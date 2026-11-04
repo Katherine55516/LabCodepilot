@@ -1,0 +1,742 @@
+/**
+ * Error Classifier — structured error categorization for Claude Code process errors.
+ *
+ * Replaces the ad-hoc if/else chain in claude-client.ts with a pattern-matching
+ * classifier that produces actionable, user-facing error messages.
+ */
+
+// ── Error categories ────────────────────────────────────────────
+
+export type ClaudeErrorCategory =
+  | 'CLI_NOT_FOUND'
+  | 'NO_CREDENTIALS'
+  | 'AUTH_REJECTED'
+  | 'AUTH_FORBIDDEN'
+  | 'AUTH_STYLE_MISMATCH'
+  | 'RATE_LIMITED'
+  | 'NETWORK_UNREACHABLE'
+  | 'STREAM_DISCONNECTED'
+  | 'ENDPOINT_NOT_FOUND'
+  | 'MODEL_NOT_AVAILABLE'
+  | 'CONTEXT_TOO_LONG'
+  | 'UNSUPPORTED_FEATURE'
+  | 'CLI_VERSION_TOO_OLD'
+  | 'CLI_INSTALL_CONFLICT'
+  | 'MISSING_GIT_BASH'
+  | 'RESUME_FAILED'
+  | 'SESSION_STATE_ERROR'
+  | 'PROVIDER_NOT_APPLIED'
+  | 'CONTENT_BLOCKED'         // Upstream safety/AUP refusal (stop_reason: refusal)
+  | 'PROCESS_CRASH'
+  // Native Runtime categories
+  | 'NATIVE_STREAM_ERROR'    // Agent loop streamText() failure
+  | 'OPENAI_AUTH_FAILED'     // OpenAI OAuth token expired/invalid
+  | 'MCP_CONNECTION_ERROR'   // MCP server connect/sync failure
+  | 'EMPTY_RESPONSE'         // Model returned nothing (proxy rejection, unsupported model)
+  | 'IMAGES_NOT_SUPPORTED'   // User attached image(s) to a non-multimodal model
+  | 'UNKNOWN';
+
+/** A concrete action the user can take to recover from an error */
+export interface RecoveryAction {
+  /** Button label */
+  label: string;
+  /** URL to open (external link) */
+  url?: string;
+  /** Internal action type */
+  action?: 'open_settings' | 'retry' | 'new_conversation';
+}
+
+export interface ClassifiedError {
+  category: ClaudeErrorCategory;
+  /** User-facing message explaining what went wrong */
+  userMessage: string;
+  /** Actionable hint telling the user how to fix it */
+  actionHint: string;
+  /** Original raw error message */
+  rawMessage: string;
+  /** Provider name if available */
+  providerName?: string;
+  /** Additional detail (stderr, cause, etc.) */
+  details?: string;
+  /** Whether this error is likely transient and retryable */
+  retryable: boolean;
+  /** Structured recovery actions for UI buttons */
+  recoveryActions?: RecoveryAction[];
+}
+
+// ── Classification context ──────────────────────────────────────
+
+export interface ErrorContext {
+  /** The raw Error object */
+  error: unknown;
+  /** Accumulated stderr output from the CLI process */
+  stderr?: string;
+  /** Provider name for error messages */
+  providerName?: string;
+  /** Provider base URL */
+  baseUrl?: string;
+  /** Whether images were attached */
+  hasImages?: boolean;
+  /** Whether thinking mode was enabled */
+  thinkingEnabled?: boolean;
+  /** Whether 1M context was enabled */
+  context1mEnabled?: boolean;
+  /** Whether effort was set */
+  effortSet?: boolean;
+  /** Provider meta info from preset (for recovery action URLs) */
+  providerMeta?: {
+    apiKeyUrl?: string;
+    docsUrl?: string;
+    pricingUrl?: string;
+  };
+}
+
+// ── Pattern definitions ─────────────────────────────────────────
+
+interface ErrorPattern {
+  category: ClaudeErrorCategory;
+  /** Patterns to match against error message + stderr */
+  patterns: Array<string | RegExp>;
+  /** Match against error code (ENOENT, ECONNREFUSED, etc.) */
+  codes?: string[];
+  userMessage: (ctx: ErrorContext) => string;
+  actionHint: (ctx: ErrorContext) => string;
+  retryable: boolean;
+}
+
+const providerHint = (ctx: ErrorContext) =>
+  ctx.providerName ? ` (Provider: ${ctx.providerName})` : '';
+
+// ── Windows missing-shell copy ──────────────────────────────────
+// Chinese-first: same rationale as IMAGES_NOT_SUPPORTED below — the product
+// targets zh-CN users, and this exact error once cost a user two weeks of
+// misdirected API-key debugging because the packaged app showed the generic
+// PROCESS_CRASH copy ("Invalid or missing API Key …") instead of the CLI's
+// real stderr message.
+const MISSING_GIT_BASH_USER_MESSAGE =
+  'Windows 上运行 Claude Code 需要安装 Git for Windows（或确保 PowerShell 可用），当前系统缺少可用的 shell 环境。' +
+  '这与 API Key、Base URL 或网络配置无关。';
+const MISSING_GIT_BASH_ACTION_HINT =
+  '请从 https://git-scm.com/downloads/win 下载安装 Git for Windows（或确保 PowerShell 在系统 PATH 中）；' +
+  '也可以打开「设置 → Claude CLI」，安装向导会自动检测并引导安装 Git for Windows。' +
+  '安装完成后重新发送消息即可，若仍报此错误请重启应用。';
+
+// ── Upstream safety / AUP refusal copy ──────────────────────────
+// Chinese-first: same rationale as MISSING_GIT_BASH / IMAGES_NOT_SUPPORTED.
+//
+// The CLI turns an upstream policy block into a synthetic assistant message
+// with `stop_reason: "refusal"` and an `invalid_request` error, which the SDK
+// re-throws as `Claude Code returned an error result: API Error: …`. Verified
+// verbatim shapes in the bundled binary (claude-agent-sdk-darwin-arm64/claude):
+//   1. `API Error: <Model> can't help with this. Start a new session to
+//      continue.\n\nLearn more: https://www.anthropic.com/legal/aup`
+//   2. `API Error: <Model>'s safeguards flagged this message
+//      (https://www.anthropic.com/legal/aup). … Claude Code can't respond to
+//      this message with <Model>. …`
+//   3. cyber category: `API Error: <Model>'s safeguards flagged this message.
+//      … Cyber Verification Program …` (no AUP url — own help-center link)
+// Shape 1 is what the field report hit (packaged v4.2.0 main.log, 4 occurrences
+// between 2026-08-13 and 2026-08-17); it matched no pattern and degraded to
+// UNKNOWN → "An unexpected error occurred … run Provider Doctor", sending the
+// user to diagnose a provider that was working fine.
+const CONTENT_BLOCKED_USER_MESSAGE =
+  '本轮请求被上游安全策略拦截，模型拒绝继续输出。这与 API Key、额度、Base URL 或网络都无关。';
+const CONTENT_BLOCKED_ACTION_HINT =
+  '这类拦截跟着整段对话历史复发 —— 在当前会话里说「继续」或重发只会再次被拦。' +
+  '请新建会话，只带上必要的上下文重新提问；换个说法仍被拦时，切换右下角的模型再试。';
+const CONTENT_BLOCKED_CYBER_SUFFIX =
+  ' 本次拦截被判定为网络安全类话题：若确属正常的安全研究/防御工作，可通过 Anthropic 的 ' +
+  'Cyber Verification Program 申请放行，或改用其他模型。';
+
+/** 复原 classifyErrorCore 的检索文本(pattern 回调只拿到 ctx,拿不到 searchText)。 */
+function ctxSearchText(ctx: ErrorContext): string {
+  const rawMessage = ctx.error instanceof Error ? ctx.error.message : String(ctx.error);
+  const cause = ctx.error instanceof Error ? (ctx.error as { cause?: unknown }).cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+  return `${rawMessage}\n${ctx.stderr ?? ''}\n${causeMsg}`.toLowerCase();
+}
+
+const ERROR_PATTERNS: ErrorPattern[] = [
+  // ── Missing shell on Windows (fatal CLI startup, must be FIRST) ──
+  // Without Git for Windows / PowerShell the CLI exits with code 1 and
+  // prints its diagnosis only to stderr. The patterns below are the CLI's
+  // actual fatal phrasings (verified against the bundled binary):
+  //   "Claude Code on Windows requires either Git for Windows (for bash)
+  //    or PowerShell. Install one of: …"
+  //   "Claude Code on Windows requires a shell tool. Git Bash was not found
+  //    and the PowerShell tool is disabled (CLAUDE_CODE_USE_POWERSHELL_TOOL=0)."
+  //   "Git Bash was not found. Install Git for Windows (…), or …"
+  // This entry must precede CLI_NOT_FOUND: "Git Bash was not found" contains
+  // the substring 'not found', which CLI_NOT_FOUND would otherwise swallow.
+  // Deliberately NOT matched: the non-fatal warning "Git Bash not found;
+  // BashTool will be unavailable" (no 'was') — a session that degrades to
+  // PowerShell and later fails for another reason (e.g. 401) must still
+  // classify as the real error.
+  {
+    category: 'MISSING_GIT_BASH',
+    patterns: [
+      'requires either git for windows',
+      'requires a shell tool',
+      'git bash was not found',
+      'bash.exe not found',
+    ],
+    userMessage: () => MISSING_GIT_BASH_USER_MESSAGE,
+    actionHint: () => MISSING_GIT_BASH_ACTION_HINT,
+    retryable: false,
+  },
+
+  // ── Upstream safety / AUP refusal (must be near the top) ──
+  // Placed second on purpose: every pattern here is an exact CLI phrase, so it
+  // cannot hijack anything, while several LATER entries are loose enough to
+  // swallow a refusal if the order ever changes (CLI_VERSION_TOO_OLD matches a
+  // bare 'version', UNSUPPORTED_FEATURE matches 'not supported').
+  // NOTE: apostrophes are plain ASCII 0x27 in the CLI strings — verified
+  // against both the binary and the field main.log bytes. Do not "fix" these
+  // into typographic quotes; the substring match would stop working.
+  {
+    category: 'CONTENT_BLOCKED',
+    patterns: [
+      "can't help with this",
+      'safeguards flagged this message',
+      "can't respond to this message with",
+      'anthropic.com/legal/aup',
+    ],
+    userMessage: (ctx) => `${CONTENT_BLOCKED_USER_MESSAGE}${providerHint(ctx)}`,
+    actionHint: (ctx) => {
+      const text = ctxSearchText(ctx);
+      const isCyber = text.includes('cyber verification program') ||
+        text.includes('cybersecurity topic');
+      return CONTENT_BLOCKED_ACTION_HINT + (isCyber ? CONTENT_BLOCKED_CYBER_SUFFIX : '');
+    },
+    // Not retryable: resending the same prefix is precisely what re-trips it.
+    retryable: false,
+  },
+
+  // ── CLI not found ──
+  // 'command not found' (shell wording), NOT the bare 'not found': now that
+  // spawn points feed buffered stderr into classification, a bare 'not found'
+  // would hijack unrelated errors on incidental stderr lines (e.g. the
+  // non-fatal "Git Bash not found; BashTool will be unavailable" warning, or
+  // "model … not found" upstream bodies). Real spawn failures are still fully
+  // covered by ENOENT (code + message), 'spawn', and 'No such file'.
+  {
+    category: 'CLI_NOT_FOUND',
+    patterns: ['ENOENT', 'spawn', 'command not found', 'No such file'],
+    codes: ['ENOENT'],
+    userMessage: () => 'Claude Code CLI not found.',
+    actionHint: () => 'Please install Claude Code CLI and ensure it is available in your PATH. Run: npm install -g @anthropic-ai/claude-code',
+    retryable: false,
+  },
+
+  // ── No credentials ──
+  //
+  // `not logged in` / `please run /login` is the Claude Code CLI's native
+  // error when settings.json is missing or its base URL/token combo is
+  // rejected. In the AI Native Lab UI the CLI's /login flow is a dead-end, so
+  // we surface the same user-friendly guidance as a true credentials-missing
+  // case — open the Providers setup instead of telling users to run a
+  // command that doesn't exist in the desktop app.
+  {
+    category: 'NO_CREDENTIALS',
+    patterns: [
+      'no api key', 'missing api key', 'ANTHROPIC_API_KEY is not set',
+      'api key required', 'missing credentials',
+      'not logged in', 'please run /login',
+    ],
+    userMessage: (ctx) => `No API credentials found${providerHint(ctx)}.`,
+    actionHint: () => 'Go to Settings → Providers and add your API key, or set the ANTHROPIC_API_KEY environment variable.',
+    retryable: false,
+  },
+
+  // ── Auth rejected (401) ──
+  {
+    category: 'AUTH_REJECTED',
+    patterns: ['401', 'Unauthorized', 'invalid_api_key', 'invalid api key', 'authentication failed', 'authentication_error'],
+    userMessage: (ctx) => `Authentication failed${providerHint(ctx)}.`,
+    actionHint: () => 'Verify your API key is correct and has not expired. If using a third-party provider, check that the auth style (API Key vs Auth Token) matches.',
+    retryable: false,
+  },
+
+  // ── Auth forbidden (403) ──
+  {
+    category: 'AUTH_FORBIDDEN',
+    patterns: ['403', 'Forbidden', 'permission_error', 'access denied'],
+    userMessage: (ctx) => `Access denied${providerHint(ctx)}.`,
+    actionHint: () => 'Your API key may lack permissions for this operation. Check your plan limits or contact your provider.',
+    retryable: false,
+  },
+
+  // ── Auth style mismatch ──
+  {
+    category: 'AUTH_STYLE_MISMATCH',
+    patterns: ['x-api-key', 'bearer token', 'auth_token.*invalid', 'api_key.*invalid'],
+    userMessage: (ctx) => `Auth style mismatch${providerHint(ctx)}.`,
+    actionHint: () => 'This provider may require a different auth style. Try switching between "API Key" and "Auth Token" in provider settings.',
+    retryable: false,
+  },
+
+  // ── Rate limited (429) ──
+  {
+    category: 'RATE_LIMITED',
+    patterns: ['429', 'rate limit', 'Rate limit', 'too many requests', 'overloaded'],
+    userMessage: () => 'Rate limit exceeded.',
+    actionHint: () => 'Wait a moment before retrying. If this persists, consider upgrading your API plan.',
+    retryable: true,
+  },
+
+  // ── Model not available ──
+  {
+    category: 'MODEL_NOT_AVAILABLE',
+    patterns: ['model_not_found', 'model not found', 'model_not_available', 'invalid model', 'does not exist', 'not_found_error.*model'],
+    userMessage: (ctx) => `Model not available${providerHint(ctx)}.`,
+    actionHint: () => 'The selected model may not be supported by this provider. Check the model name in provider settings or try a different model.',
+    retryable: false,
+  },
+
+  // ── Context too long ──
+  {
+    category: 'CONTEXT_TOO_LONG',
+    patterns: ['context_length', 'context window', 'too many tokens', 'max_tokens', 'prompt is too long'],
+    userMessage: () => 'Conversation context is too long.',
+    actionHint: () => 'Context is being auto-compressed. If this persists, try /compact or start a new conversation.',
+    retryable: false, // Backend handles retry internally via reactive compact
+  },
+
+  // ── Unsupported feature (unknown option) ──
+  {
+    category: 'UNSUPPORTED_FEATURE',
+    patterns: ['unknown option', 'unrecognized option', 'not supported', 'invalid option', 'unexpected argument'],
+    userMessage: () => 'Your Claude Code CLI version does not support a requested feature.',
+    actionHint: () => 'Update Claude Code CLI to the latest version: npm update -g @anthropic-ai/claude-code',
+    retryable: false,
+  },
+
+  // ── CLI version too old ──
+  {
+    category: 'CLI_VERSION_TOO_OLD',
+    patterns: ['version', 'upgrade required', 'minimum version'],
+    userMessage: () => 'Your Claude Code CLI version is too old.',
+    actionHint: () => 'Update to the latest version: npm update -g @anthropic-ai/claude-code',
+    retryable: false,
+  },
+
+  // ── Stream disconnected mid-response ──
+  // Claude Code CLI surfaces upstream/gateway stream drops as
+  // "API Error: Connection closed mid-response. The response above may be
+  // incomplete." — observed systematically with managed-gateway models
+  // (e.g. Qwen3.7-Plus) on long test-execution streams. Without this
+  // pattern it fell through to UNKNOWN ("An unexpected error occurred").
+  // 中文文案:与 IMAGES_NOT_SUPPORTED 快速通道同理,新增分支默认中文
+  // (产品面向 zh-CN 用户;测试面板直接显示 userMessage 原文)。
+  {
+    category: 'STREAM_DISCONNECTED',
+    // 三个变体均来自 CLI 2.1.203 二进制原文(strings 实证):
+    // "Connection closed mid-response" / "connection closed mid-call" /
+    // "connection dropped mid-request"。
+    patterns: ['closed mid-response', 'closed mid-call', 'dropped mid-request'],
+    userMessage: (ctx) => `模型响应中途连接被断开${ctx.providerName ? `（${ctx.providerName}）` : ''}。`,
+    actionHint: () => '通常是网关或服务商在长响应上超时断流（偶发，或该模型侧的问题）。请重试；若同一模型反复出现，请换用其他模型，或联系管理员检查网关的流式超时配置。',
+    retryable: true,
+  },
+
+  // ── Network unreachable ──
+  {
+    category: 'NETWORK_UNREACHABLE',
+    patterns: ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'fetch failed', 'network error', 'DNS', 'ENOTFOUND'],
+    codes: ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'],
+    userMessage: (ctx) => `Cannot connect to API endpoint${ctx.baseUrl ? ` (${ctx.baseUrl})` : ''}.`,
+    actionHint: () => 'Check your network connection and the Base URL in provider settings.',
+    retryable: true,
+  },
+
+  // ── Endpoint not found (404) ──
+  {
+    category: 'ENDPOINT_NOT_FOUND',
+    patterns: ['404', 'Not Found', 'endpoint not found'],
+    userMessage: (ctx) => `API endpoint not found${providerHint(ctx)}.`,
+    actionHint: () => 'The Base URL may be incorrect. Check your provider settings and ensure the URL includes the correct path (e.g. /v1).',
+    retryable: false,
+  },
+
+  // ── Resume failed ──
+  // Must be before PROCESS_CRASH so session-related crashes don't get
+  // misclassified as provider configuration problems.
+  {
+    category: 'RESUME_FAILED',
+    patterns: [
+      'resume failed',
+      'session not found',
+      'invalid session',
+      'session expired',
+      'could not resume',
+      'failed to resume',
+      'resume_failed',
+      'conversation not found',
+      /session\s+id\s+.*\s*(invalid|expired|not found|missing)/,
+    ],
+    userMessage: () => 'Failed to resume previous conversation.',
+    actionHint: () => 'The conversation will start fresh automatically. No action needed.',
+    retryable: false,
+  },
+
+  // ── Session state error ──
+  // Catches stale/corrupt session state that causes CLI crashes.
+  // Must be before PROCESS_CRASH to prevent misclassification as provider issues.
+  {
+    category: 'SESSION_STATE_ERROR',
+    patterns: [
+      'stale session',
+      'stale sdk_session',
+      'session state',
+      'session_state',
+      'corrupt session',
+      'session mismatch',
+      'session context',
+      /sdk_session_id.*(?:invalid|stale|expired|corrupt|mismatch)/,
+      /(?:invalid|stale|expired|corrupt)\s*(?:session|sdk_session)/,
+    ],
+    userMessage: () => 'Session state is invalid or corrupted.',
+    actionHint: () => 'The stored session state has become stale. Please start a new conversation, or retry — the session will be automatically reset.',
+    retryable: true,
+  },
+
+  // ── Process crash (exit code) ──
+  {
+    category: 'PROCESS_CRASH',
+    patterns: [/exited with code \d+/, /exit code \d+/],
+    userMessage: (ctx) => {
+      const hints: string[] = [];
+      hints.push('Invalid or missing API Key');
+      hints.push('Incorrect Base URL configuration');
+      hints.push('Network connectivity issues');
+      if (ctx.hasImages) hints.push('Provider may not support image/vision input');
+      if (ctx.thinkingEnabled) hints.push('Thinking mode may not be supported');
+      if (ctx.context1mEnabled) hints.push('1M context may not be supported');
+      return `Claude Code process exited with an error${providerHint(ctx)}. Common causes:\n• ${hints.join('\n• ')}`;
+    },
+    actionHint: () => 'Check your API key and provider settings. Run Provider Doctor in Settings for detailed diagnostics.',
+    retryable: false,
+  },
+];
+
+// ── Session-related keywords for PROCESS_CRASH refinement ────
+// When a process crash stderr contains these keywords, the error is likely
+// a session state issue rather than a provider configuration problem.
+const SESSION_RELATED_KEYWORDS = [
+  'resume', 'session', 'sdk_session', 'conversation_id',
+  'stale', 'corrupt', 'session_id',
+];
+
+// ── Classifier ──────────────────────────────────────────────────
+
+/**
+ * Classify an error from the Claude Code process into a structured error
+ * with user-facing message and actionable hints.
+ *
+ * Internal core — the exported `classifyError` wraps this to prefer the
+ * upstream gateway's human-readable `message` (e.g. quota-exceeded) when present.
+ */
+function classifyErrorCore(ctx: ErrorContext): ClassifiedError {
+  const error = ctx.error;
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const errorCode = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+  const stderrContent = ctx.stderr || '';
+  const cause = error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
+  const extraDetail = stderrContent || (cause instanceof Error ? cause.message : cause ? String(cause) : '');
+
+  // Combined text to search through
+  const searchText = `${rawMessage}\n${stderrContent}\n${extraDetail}`.toLowerCase();
+
+  // ── Fast-path: non-multimodal model rejecting an image attachment ──
+  // Must run before the ERROR_PATTERNS loop because UNSUPPORTED_FEATURE
+  // contains `'not supported'` and MODEL_NOT_AVAILABLE contains
+  // `'does not exist'` — without this short-circuit the friendly
+  // "model doesn't support images" message would be eaten by those
+  // earlier patterns. Double-gated on `hasImages` so we never misfire
+  // when the message contains the keyword but the user didn't actually
+  // attach an image.
+  if (ctx.hasImages) {
+    const IMAGE_UNSUPPORTED_KEYWORDS = [
+      'does not support vision',
+      'does not support image',
+      'image content are not supported',
+      'image content is not supported',
+      'image_url is not supported',
+      'unsupported image',
+      'image input is not',
+      'multimodal is not supported',
+      'this model does not support multimodal',
+    ];
+    if (IMAGE_UNSUPPORTED_KEYWORDS.some(kw => searchText.includes(kw))) {
+      // Chinese-first wording — the rest of the classifier still emits
+      // English to stay consistent with its existing 21 categories, but
+      // this newly-added branch defaults to Chinese because the product
+      // is targeted at zh-CN users. If we ever do a full i18n pass on
+      // the classifier, move this string into the i18n bundle.
+      const providerLabel = ctx.providerName ? `「${ctx.providerName}」` : '';
+      return {
+        category: 'IMAGES_NOT_SUPPORTED',
+        userMessage: `当前模型${providerLabel}不支持图片输入。`,
+        actionHint: '请移除消息中的图片后重发，或切换右下角的模型为支持视觉输入的版本（例如 Claude Sonnet / Opus）。',
+        rawMessage,
+        providerName: ctx.providerName,
+        details: extraDetail || undefined,
+        retryable: false,
+        recoveryActions: buildRecoveryActions('IMAGES_NOT_SUPPORTED', ctx),
+      };
+    }
+  }
+
+  for (const pattern of ERROR_PATTERNS) {
+    // Check error code first (most specific)
+    if (pattern.codes && errorCode && pattern.codes.includes(errorCode)) {
+      return buildResult(pattern, ctx, rawMessage, extraDetail);
+    }
+
+    // Check patterns against combined text
+    const matched = pattern.patterns.some(p => {
+      if (typeof p === 'string') {
+        return searchText.includes(p.toLowerCase());
+      }
+      return p.test(searchText);
+    });
+
+    if (matched) {
+      // Refinement: if matched as PROCESS_CRASH but stderr contains
+      // session-related keywords, reclassify as SESSION_STATE_ERROR
+      // to avoid misleading "check API Key / Base URL" prompts.
+      if (pattern.category === 'PROCESS_CRASH') {
+        const hasSessionKeywords = SESSION_RELATED_KEYWORDS.some(kw =>
+          searchText.includes(kw),
+        );
+        if (hasSessionKeywords) {
+          return {
+            category: 'SESSION_STATE_ERROR',
+            userMessage: 'Session state is invalid or corrupted.',
+            actionHint: 'The stored session state has become stale. Please start a new conversation, or retry — the session will be automatically reset.',
+            rawMessage,
+            providerName: ctx.providerName,
+            details: extraDetail || undefined,
+            retryable: true,
+            recoveryActions: buildRecoveryActions('SESSION_STATE_ERROR', ctx),
+          };
+        }
+      }
+      return buildResult(pattern, ctx, rawMessage, extraDetail);
+    }
+  }
+
+  // Fallback: unknown error
+  return {
+    category: 'UNKNOWN',
+    userMessage: `An unexpected error occurred${providerHint(ctx)}.`,
+    actionHint: 'Check the error details below. If the problem persists, run Provider Doctor in Settings.',
+    rawMessage,
+    providerName: ctx.providerName,
+    details: extraDetail || undefined,
+    retryable: false,
+    recoveryActions: buildRecoveryActions('UNKNOWN', ctx),
+  };
+}
+
+// 纯 HTTP 状态短语:信息量低于通用分类文案,提取到这些时回退(不覆盖)。
+const HTTP_STATUS_PHRASES = new Set([
+  'forbidden', 'unauthorized', 'not found', 'bad request', 'conflict',
+  'internal server error', 'service unavailable', 'bad gateway', 'gateway timeout',
+  'too many requests', 'request timeout', 'unprocessable entity', 'method not allowed',
+]);
+
+/**
+ * 从原始错误文本里提取上游网关返回的可读 message(如额度不足提示)。覆盖两种形态:
+ *  - JSON:`… {"error":{"message":"用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)"}}`
+ *  - 纯文本(Claude Code SDK 已把 HTTP body 解析后拼成):
+ *    `… Failed to authenticate. API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)`
+ * 均返回「用户高阶模型额度不足, 剩余: ¥-0.024640」(去掉尾部 request id)。
+ * 纯 HTTP 状态短语(Forbidden 等)或提取不到 → 返回 null,回退通用分类。
+ */
+export function extractUpstreamMessage(text: string): string | null {
+  if (!text) return null;
+  let msg: string | null = null;
+
+  // 1) 取文本里的 JSON 子串(首个 { 到末个 })尝试解析,读 error.message 或顶层 message
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    try {
+      const parsed = JSON.parse(text.slice(first, last + 1)) as {
+        error?: { message?: unknown };
+        message?: unknown;
+      };
+      const m = parsed?.error?.message ?? parsed?.message;
+      if (typeof m === 'string' && m.trim()) msg = m;
+    } catch {
+      /* 非完整 JSON — 落到下面 */
+    }
+  }
+
+  // 2) JSON 嵌在文本里但整体不可解析:正则提第一个 "message":"…"(再走 JSON.parse 解转义)
+  if (!msg) {
+    const m = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (m && m[1]) {
+      try {
+        msg = JSON.parse(`"${m[1]}"`) as string;
+      } catch {
+        msg = m[1];
+      }
+    }
+  }
+
+  // 3) 纯文本:`API Error: <状态码> <可读文本>`(SDK 已把上游 JSON body 解析成文本)
+  if (!msg) {
+    const m = text.match(/API Error:\s*\d+\s+([\s\S]+)$/);
+    if (m && m[1]) msg = m[1];
+  }
+
+  if (!msg || !msg.trim()) return null;
+  // 去掉尾部 (request id: …),仅 UI 不展示;完整原文仍保留在 rawMessage 供排查
+  const cleaned = msg.replace(/\s*\(request id:[^)]*\)\s*$/i, '').trim();
+  if (!cleaned || HTTP_STATUS_PHRASES.has(cleaned.toLowerCase())) return null;
+  return cleaned;
+}
+
+/**
+ * 对外的分类入口:在 classifyErrorCore 的结果上,优先用上游网关返回的可读
+ * message 覆盖通用文案——服务端 message(如「用户高阶模型额度不足」)比通用
+ * 分类更直观。提取不到时保持原分类不变。
+ */
+export function classifyError(ctx: ErrorContext): ClassifiedError {
+  const result = classifyErrorCore(ctx);
+  // CONTENT_BLOCKED opts out of the upstream-message override. A gateway that
+  // wraps the refusal in JSON (`{"error":{"message":"… can't help with this …"}}`)
+  // would otherwise get its one raw sentence promoted while actionHint and
+  // recoveryActions are cleared — dropping the only thing the user needs to
+  // know (start a NEW session; continuing re-trips it). The raw upstream text
+  // is still shown under "Original error".
+  if (result.category === 'CONTENT_BLOCKED') return result;
+  const rawMessage = ctx.error instanceof Error ? ctx.error.message : String(ctx.error);
+  const cause = ctx.error instanceof Error ? (ctx.error as { cause?: unknown }).cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+  const upstream = extractUpstreamMessage(`${rawMessage}\n${ctx.stderr ?? ''}\n${causeMsg}`);
+  if (upstream) {
+    result.userMessage = upstream; // Error 行直接展示上游可读 message
+    result.actionHint = '';        // 前端据空串不渲染「What to do」
+    result.recoveryActions = [];   // 只显示 message(用户选择)
+  }
+  return result;
+}
+
+function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext): RecoveryAction[] {
+  const actions: RecoveryAction[] = [];
+  const meta = ctx.providerMeta;
+
+  switch (category) {
+    case 'AUTH_REJECTED':
+    case 'AUTH_FORBIDDEN':
+    case 'AUTH_STYLE_MISMATCH':
+    case 'NO_CREDENTIALS':
+      if (meta?.apiKeyUrl) actions.push({ label: 'Get API Key', url: meta.apiKeyUrl });
+      actions.push({ label: 'Open Settings', action: 'open_settings' });
+      break;
+    case 'RATE_LIMITED':
+      actions.push({ label: 'Retry', action: 'retry' });
+      if (meta?.pricingUrl) actions.push({ label: 'Upgrade Plan', url: meta.pricingUrl });
+      break;
+    case 'STREAM_DISCONNECTED':
+      actions.push({ label: 'Retry', action: 'retry' });
+      break;
+    case 'MODEL_NOT_AVAILABLE':
+    case 'ENDPOINT_NOT_FOUND':
+    case 'NETWORK_UNREACHABLE':
+      if (meta?.docsUrl) actions.push({ label: 'View Docs', url: meta.docsUrl });
+      actions.push({ label: 'Open Settings', action: 'open_settings' });
+      break;
+    case 'RESUME_FAILED':
+    case 'SESSION_STATE_ERROR':
+      actions.push({ label: 'New Conversation', action: 'new_conversation' });
+      break;
+    case 'CONTENT_BLOCKED':
+      // Chinese labels to match the category's Chinese-first copy above.
+      // Deliberately NO 'retry' and NO 'Open Settings': retrying resends the
+      // blocked prefix, and Settings/Provider Doctor solve nothing here — that
+      // misdirection is the whole reason this category exists.
+      actions.push({ label: '新建会话', action: 'new_conversation' });
+      actions.push({ label: '查看内容政策', url: 'https://www.anthropic.com/legal/aup' });
+      break;
+    case 'MISSING_GIT_BASH':
+      // Chinese labels to match the category's Chinese-first copy above.
+      // Relative URL deep-links to the CLI settings section, where the
+      // InstallWizard's needs-git flow walks through installing Git.
+      actions.push({ label: '下载 Git for Windows', url: 'https://git-scm.com/downloads/win' });
+      actions.push({ label: '打开 CLI 设置（安装向导）', url: '/settings#cli' });
+      break;
+    case 'PROCESS_CRASH':
+      if (meta?.apiKeyUrl) actions.push({ label: 'Check API Key', url: meta.apiKeyUrl });
+      if (meta?.docsUrl) actions.push({ label: 'View Docs', url: meta.docsUrl });
+      actions.push({ label: 'Open Settings', action: 'open_settings' });
+      break;
+    case 'IMAGES_NOT_SUPPORTED':
+      // No actions — opening Settings / Provider Doctor solves nothing.
+      // The fix is for the user to either remove the image or switch
+      // models from the composer's model picker.
+      break;
+    default:
+      actions.push({ label: 'Open Settings', action: 'open_settings' });
+      break;
+  }
+
+  return actions;
+}
+
+function buildResult(
+  pattern: ErrorPattern,
+  ctx: ErrorContext,
+  rawMessage: string,
+  extraDetail: string,
+): ClassifiedError {
+  const category = pattern.category;
+
+  return {
+    category,
+    userMessage: pattern.userMessage(ctx),
+    actionHint: pattern.actionHint(ctx),
+    rawMessage,
+    providerName: ctx.providerName,
+    details: extraDetail || undefined,
+    retryable: pattern.retryable,
+    recoveryActions: buildRecoveryActions(category, ctx),
+  };
+}
+
+// ── Formatting helper ───────────────────────────────────────────
+
+/**
+ * Format a ClassifiedError into a user-friendly string for SSE error events.
+ */
+export function formatClassifiedError(err: ClassifiedError): string {
+  let msg = err.userMessage;
+  if (err.actionHint) {
+    msg += `\n\n**What to do:** ${err.actionHint}`;
+  }
+  if (err.details) {
+    msg += `\n\nDetails: ${err.details}`;
+  }
+  msg += `\n\nOriginal error: ${err.rawMessage}`;
+  return msg;
+}
+
+/**
+ * Serialize a ClassifiedError to a JSON string suitable for SSE error events.
+ * Frontend can parse this to extract structured error information.
+ */
+export function serializeClassifiedError(err: ClassifiedError): string {
+  return JSON.stringify({
+    category: err.category,
+    userMessage: err.userMessage,
+    actionHint: err.actionHint,
+    retryable: err.retryable,
+    providerName: err.providerName,
+    details: err.details,
+    rawMessage: err.rawMessage,
+    recoveryActions: err.recoveryActions,
+  });
+}

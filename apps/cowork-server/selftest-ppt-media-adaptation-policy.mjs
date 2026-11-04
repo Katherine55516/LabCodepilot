@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';import{adaptationDisposition}from'./lib/ppt-template-dispositions.mjs';import{buildMediaLedger,inspectMediaLedger}from'./lib/ppt-media-ledger.mjs';import{inspectDensity}from'./lib/ppt-density-qa.mjs';
+const icon={id:'icon',type:'image',nativeRef:{shapeId:1},geometry:{x:100,y:100,width:100,height:100},content:{mediaRole:'template_icon'}},p={source:{text:'Authoritative source',sha256:'source'},templateContentMode:'design_only',templateFidelity:{mode:'preserve',sha256:'template',width:1200,height:700,slides:[{nodes:[]},{nodes:[icon],slots:[]}]}};
+const record={...adaptationDisposition(p,icon,'template_icon','source_region_card_icon_avoidance','source relations need a clear measured region'),replacementRegion:{x:100,y:100,width:100,height:100}},slides=[{id:'cover',nodes:[]},{id:'body',nodes:[],templateOmissions:[record]}],objects={objects:[],templateAssets:[{objectId:'icon',slideId:'body',role:'template_icon',status:'retired_by_adaptation',approvalBasis:record.approvalBasis}]};
+let ledger=buildMediaLedger(p,slides,objects);assert.equal(ledger.conservation,0,'raw retention must not be relabelled as kept');assert.equal(ledger.effectiveConservation,1);assert.equal(ledger.approvedExclusions,0,'automatic layout is not a fabricated user approval');assert.equal(ledger.resolvedAdaptations.length,1);assert.ok(!inspectMediaLedger(ledger).some(i=>i.severity==='error'));
+slides[1].templateOmissions[0].sourceHash='stale';ledger=buildMediaLedger(p,slides,objects);assert.equal(ledger.effectiveConservation,0);assert.ok(inspectMediaLedger(ledger).some(i=>i.severity==='error'),'a forged/stale retirement cannot waive the gate');
+const source={text:'Long original source '.repeat(600)},decor={id:'photo',type:'image',geometry:{x:0,y:0,width:12192000,height:6858000},content:{mediaRole:'template_artwork'}},short={id:'short',type:'text',content:{text:'A short claim with no explanatory relation.'}};
+const result=inspectDensity({source,outline:[{id:'cover'},{id:'body'}]},[{id:'cover',nodes:[]},{id:'body',nodes:[decor,short]}]);assert.equal(result.metrics.visibleDensityPerSlide[1].explanatoryMediaOccupancy,0);assert.equal(result.metrics.visibleDensityPerSlide[1].decorativeMediaOccupancy,1);assert.ok(result.issues.some(i=>i.code==='gamma_density_underfill'));
+console.log('PASS verified nonrequired design adaptation vs raw retention, no forged approval, stale-proof negative, decorative occupancy cannot certify explanatory density.');
+// A sample icon shown as a numbered marker (Fable 2026-11-02, N1) is a
+// verified adaptation only while its marker is on the published page.
+{const marker=adaptationDisposition(p,icon,'template_icon','sample_icon_marker','A template sample icon is shown as a numbered marker.');
+ const asset={objects:[],templateAssets:[{objectId:'icon',slideId:'body',role:'template_icon',status:'retired_by_adaptation',approvalBasis:'sample_icon_marker'}]};
+ const shown=[{id:'cover',nodes:[]},{id:'body',nodes:[{id:'m',type:'text',content:{text:'1',derivedFrom:'sample-icon-marker',markerFor:'1'}}],templateOmissions:[marker]}];
+ assert.equal(buildMediaLedger(p,shown,asset).effectiveConservation,1,'the marker replaces the icon in place');
+ const lost=[{id:'cover',nodes:[]},{id:'body',nodes:[],templateOmissions:[marker]}];
+ assert.equal(buildMediaLedger(p,lost,asset).effectiveConservation,0,'a marker record without its marker is a loss');}
+console.log('PASS media adaptation policy: sample-icon markers count only when shown');

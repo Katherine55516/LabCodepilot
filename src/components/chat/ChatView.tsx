@@ -1,0 +1,1501 @@
+'use client';
+
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef, VmArtifactFile } from '@/types';
+import { parseMessageContent } from '@/types';
+import { BtwPanel } from './BtwPanel';
+import { useBtw } from '@/hooks/useBtw';
+import { buildFilesDisplayContent } from '@/lib/file-utils';
+import { trimMessageWindow } from '@/lib/message-window';
+import { getManagedContextWindowByName } from '@/lib/model-context';
+import { MessageList } from './MessageList';
+import { TerminalReasonChip } from './TerminalReasonChip';
+import { RateLimitBanner } from './RateLimitBanner';
+import { MessageInput } from './MessageInput';
+import { ChatComposerActionBar } from './ChatComposerActionBar';
+import { ModeIndicator } from './ModeIndicator';
+import { ChatPermissionSelector } from './ChatPermissionSelector';
+import { VmArtifactsCard } from './VmArtifactsCard';
+import { extractSkillUses, mergeSkillUses, groupSkillUses, parseSkillUsesJson, type SessionSkillUse } from '@/lib/skill-use';
+import { VmProvisioningBanner } from './VmProvisioningBanner';
+import { RunCockpit } from './RunCockpit';
+import { RuntimeBadge } from './RuntimeBadge';
+import { ImageGenToggle } from './ImageGenToggle';
+import { Button } from '@/components/ui/button';
+import { usePanel } from '@/hooks/usePanel';
+import { useCoworkStatus } from '@/hooks/useCoworkStatus';
+import { useTranslation } from '@/hooks/useTranslation';
+import type { TranslationKey } from '@/i18n';
+import { PermissionPrompt } from './PermissionPrompt';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { BatchExecutionDashboard, BatchContextSync } from './batch-image-gen';
+import { setLastGeneratedImages, loadLastGenerated } from '@/lib/image-ref-store';
+import { warmSdkCommandCache } from '@/lib/sdk-init-cache';
+import { useChatCommands } from '@/hooks/useChatCommands';
+import { useAssistantTrigger } from '@/hooks/useAssistantTrigger';
+import { useStreamSubscription } from '@/hooks/useStreamSubscription';
+import { useContextUsageRefresh } from '@/hooks/useContextUsageRefresh';
+import {
+  startStream,
+  stopStream,
+  getSnapshot,
+  getRewindPoints,
+  respondToPermission,
+} from '@/lib/stream-session-manager';
+import { registerVisibleSession } from '@/lib/turn-notifications';
+import { useDeidGate } from '@/hooks/useDeidGate';
+import { DeidPreviewDialog } from './DeidPreviewDialog';
+import { DeidRestoreContext } from '@/lib/deid-restore';
+import { containsPlaceholder, restoreText } from '@/lib/deid-utils';
+
+interface QueuedMessage {
+  content: string;
+  files?: FileAttachment[];
+  systemPromptAppend?: string;
+  displayOverride?: string;
+  mentions?: MentionRef[];
+}
+
+interface ChatViewProps {
+  sessionId: string;
+  initialMessages?: Message[];
+  initialHasMore?: boolean;
+  /** True when initialMessages is a mid-history window (deep link) and newer messages exist below it. */
+  initialHasMoreAfter?: boolean;
+  /** Deep link from global search: scroll to and highlight this message after mount. */
+  targetMessageId?: string;
+  modelName?: string;
+  providerId?: string;
+  initialPermissionProfile?: 'default' | 'full_access';
+  /** Cowork POC: whether this session runs the agent inside an isolated VM. */
+  initialSandbox?: boolean;
+  initialMode?: 'code' | 'plan';
+  initialHasSummary?: boolean;
+  /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
+  initialEffort?: string;
+  /**
+   * True when this ChatView is a BACKGROUND column inside the split-view container
+   * (SplitColumn), not a chat the user actively navigated to. Split columns stay
+   * mounted UNDER the full-screen testing workbench overlay; without this flag their
+   * mount-time effect (see the setTestPanelOpen effect below) would flip
+   * testPanelOpen→false and bounce the user out of the workbench a few seconds after
+   * opening it. Only the foreground chat should dismiss the workbench.
+   */
+  isSplitColumn?: boolean;
+}
+
+/**
+ * Maximum messages kept in React state. Older messages are trimmed and reloaded
+ * on "Load earlier". Lowered 300→150: each mounted message can carry a live
+ * widget iframe (tens of MB) or a decoded image bitmap — costs the byte cap
+ * below does NOT bound (their content bytes are small). Capping the COUNT is what
+ * bounds those, so a smaller window directly reduces renderer memory in long,
+ * widget/image-heavy sessions. (Full per-viewport virtualization is the eventual
+ * ceiling fix; this is the cheap, low-risk approximation.)
+ */
+const MAX_MESSAGES_IN_MEMORY = 150;
+/**
+ * Soft cap on total bytes of message.content kept in React state. A single
+ * multi-MB tool_result (Read/Bash/WebFetch/Agent) otherwise stays fully
+ * resident ×300 messages and can crash the renderer. When the tail exceeds this,
+ * the oldest messages are evicted (still in DB, re-fetched via "Load earlier").
+ */
+const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
+
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, initialHasMoreAfter = false, targetMessageId, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
+  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession, setSessionTitle } = usePanel();
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>(initialPermissionProfile || 'default');
+  const [sandboxEnabled, setSandboxEnabled] = useState(!!initialSandbox);
+  // Cowork sandbox: session-level artifact list (files in the VM workspace).
+  // Sources: mount-time restore fetch (DB-backed, works while VM sleeps) +
+  // per-turn vm_artifacts SSE merges. vmOnline drives the sleeping badge.
+  const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
+  const [vmOnline, setVmOnline] = useState(true);
+  // M2 (镜像流水线): 办公会话的沙箱资产状态 —— 不可用(缺失/下载中)时禁发
+  // 消息并给出进度提示(D4);仅办公会话激活探测。有数据且明确不可用才禁,
+  // 避免首个 fetch 返回前闪断;可选升级下载期间 usable 仍为 true 不误禁(M3)。
+  const coworkStatus = useCoworkStatus(sandboxEnabled);
+  const coworkAssets = coworkStatus.data?.assets;
+  const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && !coworkAssets.usable;
+
+  // ── 脱敏网关(deid-gateway)————————————————————————————————
+  // 开关(会话级持久)+ 渲染层还原字典(mapping)。还原只看 mapping 是否
+  // 非空,与开关当前状态无关:关掉开关后,历史里已存在的占位符仍需还原。
+  const [deidEnabled, setDeidEnabled] = useState(false);
+  const [deidMapping, setDeidMapping] = useState<Record<string, string>>({});
+  const deidGate = useDeidGate({
+    sessionId,
+    active: sandboxEnabled && deidEnabled,
+    onMappingUpdate: setDeidMapping,
+  });
+  const deidSetDenyValues = deidGate.setDenyValues;
+
+  // 载入会话脱敏状态(开关 + mapping + denyValues)
+  useEffect(() => {
+    if (!sandboxEnabled) return;
+    let cancelled = false;
+    fetch(`/api/deid/state?session_id=${encodeURIComponent(sessionId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setDeidEnabled(!!d.enabled);
+        setDeidMapping(d.mapping || {});
+        deidSetDenyValues(d.denyValues || []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, sandboxEnabled, deidSetDenyValues]);
+
+  // 开关翻转(乐观更新,失败回滚)
+  const handleDeidToggle = useCallback(() => {
+    const next = !deidEnabled;
+    setDeidEnabled(next);
+    fetch('/api/deid/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, enabled: next }),
+    })
+      .then((r) => { if (!r.ok) setDeidEnabled(!next); })
+      .catch(() => setDeidEnabled(!next));
+  }, [deidEnabled, sessionId]);
+
+  // 渲染层还原函数(D5):mapping 非空才提供;context 变更绕过 MessageResponse 的 memo
+  const deidRestoreFn = useMemo(() => {
+    if (!sandboxEnabled || Object.keys(deidMapping).length === 0) return null;
+    return (text: string) => restoreText(text, deidMapping);
+  }, [sandboxEnabled, deidMapping]);
+
+  // unknownPlaceholders 检测(契约 §6/§13):回合完成后把 assistant 文本交给
+  // /v1/reidentify,模型自造/改写的占位符无法还原 → toast 告警。fire-and-forget,
+  // 每条消息只查一次(ChatView 按 sessionId key 重挂,ref 天然按会话隔离)。
+  const deidCheckedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!sandboxEnabled || Object.keys(deidMapping).length === 0) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant' || deidCheckedRef.current.has(last.id)) return;
+    deidCheckedRef.current.add(last.id);
+    const text = parseMessageContent(last.content)
+      .filter((b): b is Extract<ReturnType<typeof parseMessageContent>[number], { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+    if (!text || !containsPlaceholder(text)) return;
+    fetch('/api/deid/reidentify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, text }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { unknownPlaceholders?: string[] } | null) => {
+        const unknown = d?.unknownPlaceholders || [];
+        if (unknown.length > 0) {
+          import('@/hooks/useToast').then(({ showToast }) => {
+            showToast({ type: 'warning', message: `${t('deid.unknownPlaceholders')} ${unknown.join(' ')}` });
+          });
+        }
+      })
+      .catch(() => {});
+  }, [messages, sandboxEnabled, deidMapping, sessionId, t]);
+
+  // Whether this session's working directory matches the configured assistant workspace
+  const [isAssistantProject, setIsAssistantProject] = useState(false);
+  const [assistantName, setAssistantName] = useState('');
+
+  // Workspace mismatch banner state
+  const [workspaceMismatchPath, setWorkspaceMismatchPath] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  // Deep-link window (jump-to-message): newer messages exist below the loaded tail.
+  const [hasMoreAfter, setHasMoreAfter] = useState(initialHasMoreAfter);
+  const [loadingLater, setLoadingLater] = useState(false);
+  const loadingLaterRef = useRef(false);
+
+  /** Tracks whether the tail (newest messages) was trimmed during a prepend. */
+  const tailTrimmedRef = useRef(initialHasMoreAfter);
+
+  /**
+   * Capped message setter for append paths (user send, stream completion, commands).
+   *
+   * - Normal case: trims head (oldest) when exceeding cap, sets hasMore = true.
+   * - If tail was previously trimmed by a prepend (user scrolled far up): re-fetches
+   *   the latest messages from DB as a fresh base, then applies the append on top.
+   *   This slides the window back to the bottom without losing the new message.
+   */
+  /**
+   * Reconcile the message window with DB after tail was trimmed.
+   * Preserves local-only cmd-* messages (/help, /cost) since they're never persisted.
+   * Called with a delay to ensure pending persists have completed.
+   */
+  const reconcileWithDb = useCallback(() => {
+    fetch(`/api/chat/sessions/${sessionId}/messages?limit=50`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!data?.messages) return;
+        setHasMore(data.hasMore ?? true);
+        // Window is snapped back to the newest messages — no forward gap left.
+        setHasMoreAfter(false);
+        const dbMessages: Message[] = data.messages;
+        setMessages(current => {
+          const localCommands = current.filter(m => m.id.startsWith('cmd-'));
+          if (localCommands.length === 0) return dbMessages;
+          const merged = [...dbMessages, ...localCommands];
+          return trimMessageWindow(merged, MAX_MESSAGES_IN_MEMORY, MAX_CONTENT_BYTES_IN_MEMORY).trimmed;
+        });
+      })
+      .catch(() => { /* keep current state as-is */ });
+  }, [sessionId]);
+
+  const cappedSetMessages: typeof setMessages = useCallback((action) => {
+    setMessages((prev) => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      const { trimmed, didTrim } = trimMessageWindow(next, MAX_MESSAGES_IN_MEMORY, MAX_CONTENT_BYTES_IN_MEMORY);
+      if (didTrim) setHasMore(true);
+      return trimmed;
+    });
+  }, []);
+
+  // FIX(权威分子·交付链): 回合结束后把探针后补的 context_used_tokens 拉进
+  // 当前页面（此前只落库,当前页面长期停留 fallback 口径,重进会话才跳到
+  // 权威值）。见 useContextUsageRefresh 头注释。
+  const { onTurnCompleted: refreshContextUsage, onMounted: refreshContextUsageOnMount } =
+    useContextUsageRefresh({ sessionId, setMessages: cappedSetMessages });
+  useEffect(() => {
+    // 首轮重定向/重进会话:初始加载可能早于探针落库 → 最后一条 assistant
+    // 缺 context_used_tokens 时补拉一轮(有值则零请求)。messages 每次变化
+    // 都可重调:每会话一次的去重在 hook 内部(StrictMode 双跑安全)。
+    if (messages.length === 0) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== 'assistant' || !m.token_usage) continue;
+      try {
+        const u = JSON.parse(m.token_usage) as Record<string, unknown>;
+        const used = u.context_used_tokens;
+        if (!(typeof used === 'number' && used > 0)) refreshContextUsageOnMount();
+      } catch { /* token_usage 不可解析 → 不补拉 */ }
+      return;
+    }
+  }, [messages, refreshContextUsageOnMount]);
+  const [mode, setMode] = useState<string>(initialMode || 'code');
+  const [currentModel, setCurrentModel] = useState(() => modelName || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') : null) || '');
+  const [currentProviderId, setCurrentProviderId] = useState(() => providerId || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-provider-id') : null) || '');
+  // Restore per-session reasoning effort from the DB. ''→undefined so the
+  // MessageInput selector falls back to its 'auto' default display.
+  const [selectedEffort, setSelectedEffort] = useState<string | undefined>(() => initialEffort || undefined);
+  const [thinkingMode, setThinkingMode] = useState<string>('adaptive');
+  const [context1m, setContext1m] = useState(false);
+  const [hasSummary, setHasSummary] = useState(initialHasSummary || false);
+
+  // Sync model/provider/effort when session data loads
+  useEffect(() => { if (modelName) setCurrentModel(modelName); }, [modelName]);
+  useEffect(() => { if (providerId) setCurrentProviderId(providerId); }, [providerId]);
+  // Guard on truthy so an empty restored effort never clobbers a mid-session pick.
+  useEffect(() => { if (initialEffort) setSelectedEffort(initialEffort); }, [initialEffort]);
+
+  // Fetch provider-specific options (with abort to prevent stale responses on fast switch)
+  useEffect(() => {
+    const pid = currentProviderId || 'env';
+    const controller = new AbortController();
+    fetch(`/api/providers/options?providerId=${encodeURIComponent(pid)}`, { signal: controller.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!controller.signal.aborted) {
+          setThinkingMode(data?.options?.thinking_mode || 'adaptive');
+          setContext1m(!!data?.options?.context_1m);
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [currentProviderId]);
+
+  // Resolve upstream model ID for the current model/provider so the context
+  // indicator can disambiguate alias windows (first-party opus = 1M vs
+  // Bedrock/Vertex opus = 200K). /api/providers/models already returns
+  // upstreamModelId per model on the returned groups.
+  const [currentModelUpstream, setCurrentModelUpstream] = useState<string | undefined>(undefined);
+  const [currentModelContextWindow, setCurrentModelContextWindow] = useState<number | undefined>(undefined);
+  // Models available for the current provider — used to pick a real rate-limit
+  // downgrade target instead of hardcoding the 'sonnet' alias.
+  const [availableModels, setAvailableModels] = useState<Array<{ value: string }>>([]);
+  useEffect(() => {
+    const pid = currentProviderId || 'env';
+    const controller = new AbortController();
+    fetch('/api/providers/models', { signal: controller.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (controller.signal.aborted) return;
+        const group = data?.groups?.find((g: { provider_id: string; provider_name?: string }) => g.provider_id === pid);
+        setAvailableModels(group?.models?.map((m: { value: string }) => ({ value: m.value })) || []);
+        const model = group?.models?.find((m: { value: string; upstreamModelId?: string; contextWindow?: number }) => m.value === currentModel);
+        setCurrentModelUpstream(model?.upstreamModelId);
+        // Managed providers: resolve the window from the display name (the
+        // authoritative source per product config); fall back to the
+        // provider-models contextWindow when the name isn't in the table.
+        setCurrentModelContextWindow(getManagedContextWindowByName(group?.provider_name) ?? model?.contextWindow);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [currentProviderId, currentModel]);
+  useEffect(() => { if (initialPermissionProfile) setPermissionProfile(initialPermissionProfile); }, [initialPermissionProfile]);
+  useEffect(() => { setSandboxEnabled(!!initialSandbox); }, [initialSandbox]);
+
+  // Cowork sandbox — restore the artifact list on mount/toggle (covers page
+  // reload where per-turn SSE events are gone). The list endpoint is DB-backed
+  // so it works even while the VM is asleep; vmOnline drives the sleeping badge.
+  useEffect(() => {
+    if (!sandboxEnabled) { setVmArtifacts([]); return; }
+    let cancelled = false;
+    const refetch = () => {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          if (Array.isArray(data.files)) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
+        })
+        .catch(() => {});
+    };
+    refetch();
+    // E4.2: 下载命中已删除文件时卡片发此事件 —— 重拉清单(list 端点在 VM
+    // 在线时会对账剔除已不存在的文件),把残留条目从卡片上清掉。
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
+  }, [sessionId, sandboxEnabled]);
+
+
+  // Cowork — 「使用的技能」持久化来源(chat_sessions.skills_used_json,回合末服务端
+  // 合并写入)。挂载时拉一次,回合结束借用 vm-artifacts-refresh 事件同时机重拉
+  // (E4.3 已保证回合完成必发该事件)。消息是分页加载的,不能只靠客户端解析。
+  const [persistedSkillUses, setPersistedSkillUses] = useState<SessionSkillUse[]>([]);
+  useEffect(() => {
+    if (!sandboxEnabled) { setPersistedSkillUses([]); return; }
+    let cancelled = false;
+    const refetch = () => {
+      fetch(`/api/chat/sessions/${sessionId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data?.session) return;
+          setPersistedSkillUses(parseSkillUsesJson(data.session.skills_used_json));
+        })
+        .catch(() => {});
+    };
+    refetch();
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
+  }, [sessionId, sandboxEnabled]);
+
+  // Restore session-scoped last-generated images from sessionStorage
+  useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
+
+  // Prewarm the slash popover's SDK-command cache (CLI built-ins like
+  // /simplify are invisible to the filesystem scan; without this a fresh
+  // install shows them only after the first message). Once per page load.
+  useEffect(() => { warmSdkCommandCache(); }, []);
+
+  // Dismiss the full-screen testing workbench when the user NAVIGATES to a
+  // different chat (the panel has no in-panel 收起 button, so revealing a newly
+  // opened chat requires closing the overlay — e.g. the workbench's 交接/新建对话
+  // that router.push()es to a new session).
+  //
+  // 关键陷阱（用户报单栏「点报告过几秒自动跳回同一对话」的真正根因）：/chat/[id] page 在
+  // `loading || !sessionInfoLoaded` 时只渲染 spinner，数据加载完才【首次挂载】ChatView。
+  // 若用户先打开工作台、底下同一对话的数据几秒后才加载完，ChatView 首次挂载就会触发本
+  // effect，把几秒前打开的工作台无条件关掉、露出底下那个【同一】对话 —— 看起来就是「自动跳
+  // 回对话」。(分屏 SplitColumn 的 ChatView 也是同样的异步挂载；此前 isSplitColumn 只挡住了
+  // 分屏那一路，单栏 /chat/[id] 这一路没挡住，所以改两次仍复现。)
+  //
+  // 修复：只有 sessionId ≠ 打开工作台时锚定的 testPanelBaseSession（即用户【导航到了别的
+  // 对话】）才关工作台；同一对话的异步首次挂载 sessionId===base，不关。分屏后台列
+  // (isSplitColumn) 一律不关；仅在工作台开着 (testPanelOpen) 时才需要动作。
+  useEffect(() => {
+    if (!isSplitColumn && testPanelOpen && sessionId !== testPanelBaseSession) setTestPanelOpen(false);
+  }, [sessionId, setTestPanelOpen, isSplitColumn, testPanelOpen, testPanelBaseSession]);
+
+  // Stream snapshot from the manager — drives all streaming UI
+  const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
+    () => getSnapshot(sessionId)
+  );
+
+  // Turn-completion notifications: mark this session as "visible" while its
+  // ChatView is mounted (all split panes count). A turn that completes for a
+  // visible session in a focused window is NOT notified; registering also
+  // dismisses this session's stale notification when the user returns by
+  // themselves. See src/lib/turn-notifications.ts.
+  useEffect(() => registerVisibleSession(sessionId), [sessionId]);
+
+  // Derive rendering state from snapshot
+  const isStreaming = streamSnapshot?.phase === 'active';
+  const streamingContent = streamSnapshot?.streamingContent ?? '';
+  const toolUses = streamSnapshot?.toolUses ?? [];
+  const toolResults = streamSnapshot?.toolResults ?? [];
+  const streamingToolOutput = streamSnapshot?.streamingToolOutput ?? '';
+  const streamingThinkingContent = streamSnapshot?.streamingThinkingContent ?? '';
+  // Ordered blocks for the interleaved live render (StreamingMessage).
+  const streamingBlocks = streamSnapshot?.blocks ?? [];
+  const statusText = streamSnapshot?.statusText;
+  const pendingPermission = streamSnapshot?.pendingPermission ?? null;
+  const permissionResolved = streamSnapshot?.permissionResolved ?? null;
+  const rewindPoints = getRewindPoints(sessionId);
+
+  // Cowork sandbox (E4.2) — vm_artifacts 事件自此携带「回合末权威全量快照」:
+  // 整表替换而非合并。合并语义下 agent 删除的文件会永久残留在卡片上(用户
+  // 反馈:rm 掉的文件仍显示且下载无反应);空快照也必须应用(全删光时卡片
+  // 应消失)。undefined = 本会话尚无流事件,保持 list=1 拉到的初始值。
+  const snapshotVmArtifacts = streamSnapshot?.vmArtifacts;
+  useEffect(() => {
+    if (!snapshotVmArtifacts) return;
+    setVmArtifacts(snapshotVmArtifacts);
+  }, [snapshotVmArtifacts]);
+
+  // E4.3(用户反馈)— 回合完成后无条件重拉产物清单兜底:SSE 快照可能因
+  // abort/超时/事件丢失而缺席,list 端点在 VM 在线时会对账剔除已删文件,
+  // 保证「对话完成 → 卡片即最新」不依赖任何用户后续操作。
+  const prevStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isStreaming;
+    if (wasStreaming && !isStreaming && sandboxEnabled) {
+      window.dispatchEvent(new CustomEvent('vm-artifacts-refresh'));
+    }
+  }, [isStreaming, sandboxEnabled]);
+
+  // 「使用的技能」三源合并(按 tool_use id 去重,顺序 = 持久化 → 历史解析 → 实时):
+  //   ① 持久化(完整,但只有本列上线后的回合);② 已加载历史消息解析(存量老会话
+  //   兜底,受分页局限);③ 流式实时(技能被调用的瞬间浮窗即更新)。
+  const skillsUsed = useMemo(() => {
+    if (!sandboxEnabled) return [];
+    const fromMessages: SessionSkillUse[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.content.startsWith('[')) continue;
+      try { fromMessages.push(...extractSkillUses(JSON.parse(m.content))); } catch { /* 非结构化消息 */ }
+    }
+    const live = extractSkillUses(toolUses);
+    return groupSkillUses(mergeSkillUses(persistedSkillUses, fromMessages, live));
+  }, [sandboxEnabled, messages, toolUses, persistedSkillUses]);
+
+  // ── Skill nudge banner ──
+  // Listens for 'skill-nudge' window events dispatched by stream-session-manager
+  // when the agent loop completes a complex multi-step workflow.
+  const [skillNudge, setSkillNudge] = useState<{
+    message: string;
+    step: number;
+    distinctToolCount: number;
+    toolNames: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.sessionId === sessionId) {
+        setSkillNudge({
+          message: detail.message || '',
+          step: detail.step || 0,
+          distinctToolCount: detail.distinctToolCount || 0,
+          toolNames: detail.toolNames || [],
+        });
+      }
+    };
+    window.addEventListener('skill-nudge', handler);
+    return () => window.removeEventListener('skill-nudge', handler);
+  }, [sessionId]);
+
+  // Clear nudge when starting a new message (new workflow begins)
+  useEffect(() => {
+    if (isStreaming) setSkillNudge(null);
+  }, [isStreaming]);
+
+  // ── Message queue — allows sending while AI is responding ──
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const dequeuingRef = useRef(false);
+
+  // Pending image generation notices
+  const pendingImageNoticesRef = useRef<string[]>([]);
+  const sendMessageRef = useRef<(content: string, files?: FileAttachment[], systemPromptAppend?: string, displayOverride?: string, mentions?: MentionRef[]) => Promise<void>>(undefined);
+  const initMetaRef = useRef<{ tools?: unknown; slash_commands?: unknown; skills?: unknown } | null>(null);
+
+  const handleModeChange = useCallback((newMode: string) => {
+    setMode(newMode);
+    if (sessionId) {
+      fetch(`/api/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      }).then(() => {
+        window.dispatchEvent(new CustomEvent('session-updated'));
+      }).catch(() => { /* silent */ });
+
+      fetch('/api/chat/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, mode: newMode }),
+      }).catch(() => { /* silent */ });
+    }
+  }, [sessionId]);
+
+  const handleProviderModelChange = useCallback((newProviderId: string, model: string) => {
+    setCurrentProviderId(newProviderId);
+    setCurrentModel(model);
+    fetch(`/api/chat/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, provider_id: newProviderId }),
+    }).catch(() => {});
+  }, [sessionId]);
+
+  // Persist reasoning effort per session so it survives conversation switches
+  // and app restarts. The 'auto' sentinel (and undefined) mean "no explicit
+  // effort" — normalise both to '' in the DB so only real levels are stored.
+  const handleEffortChange = useCallback((effort: string | undefined) => {
+    setSelectedEffort(effort);
+    if (sessionId) {
+      const persisted = effort && effort !== 'auto' ? effort : '';
+      fetch(`/api/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effort: persisted }),
+      }).catch(() => {});
+    }
+  }, [sessionId]);
+
+  // ── Extracted hooks ──
+
+  const handleStreamCompleted = useCallback((phase: string) => {
+    // Only reconcile on normal completion — both messages are persisted.
+    // Error/stopped/idle-timeout paths emit 'completed' before the server
+    // has persisted partial output, so reconciliation would race.
+    if (tailTrimmedRef.current && phase === 'completed') {
+      tailTrimmedRef.current = false;
+      reconcileWithDb();
+    }
+    // FIX(权威分子·交付链): 正常完成才轮询探针后补值 —— 停止/出错路径服务端
+    // 未必落库完整,且探针的 match(input/output)也对不上,轮询只会空转。
+    if (phase === 'completed') {
+      refreshContextUsage();
+    }
+    // Cowork sandbox — refetch the artifact list at end of turn. Belt-and-
+    // braces for the realtime vm_artifacts SSE path: completion clears the
+    // manager snapshot, and event batching around done/completed has already
+    // eaten the realtime update once. The list endpoint is authoritative.
+    if (sandboxEnabled) {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data) return;
+          if (Array.isArray(data.files) && data.files.length > 0) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
+        })
+        .catch(() => {});
+    }
+    // Async title generation (first turn) usually lands before the turn ends —
+    // refetch so the top bar shows the generated title and nudge the sidebar
+    // (its own poll would catch up anyway; this removes the visible lag).
+    if (phase === 'completed' && sessionId) {
+      fetch(`/api/chat/sessions/${sessionId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          const title = data?.session?.title;
+          if (typeof title === 'string' && title) {
+            setSessionTitle(title);
+            window.dispatchEvent(new CustomEvent('session-updated'));
+          }
+        })
+        .catch(() => { /* silent — sidebar poll will catch up */ });
+    }
+  }, [reconcileWithDb, refreshContextUsage, sandboxEnabled, sessionId, setSessionTitle]);
+
+  useStreamSubscription({
+    sessionId,
+    setStreamSnapshot,
+    setStreamingSessionId,
+    setPendingApprovalSessionId,
+    setMessages: cappedSetMessages,
+    onStreamCompleted: handleStreamCompleted,
+  });
+
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (initialMessages.length > 0 && !initializedRef.current) {
+      initializedRef.current = true;
+      setMessages(initialMessages);
+    }
+  }, [initialMessages]);
+
+  useEffect(() => { setHasMore(initialHasMore); }, [initialHasMore]);
+
+  // Detect compression from multiple sources:
+  // 1. Auto-compression: stream-session-manager dispatches 'context-compressed' event
+  // 2. Manual /compact: response message contains the compression marker
+  useEffect(() => {
+    if (!hasSummary && messages.some(m => m.role === 'assistant' && m.content.includes('上下文已压缩'))) {
+      setHasSummary(true);
+    }
+  }, [messages, hasSummary]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.sessionId === sessionId) {
+        setHasSummary(true);
+        // Phase 1b: if the user asked for "compress and retry", kick off
+        // the retry now that compression actually finished. Stored flag
+        // + last user message are consumed once so we can't replay
+        // twice. Staleness protection uses (a) the arming-flag gate in
+        // the sendMessage wrapper to clear pending state on any
+        // subsequent user action, (b) the 45s timeout on the arm, and
+        // (c) the session-switch clear — no per-request / compact run
+        // id is wired through the SSE contract, so we rely on those
+        // three clears rather than a correlation token.
+        if (pendingRetryAfterCompactRef.current && pendingRetryMessageRef.current) {
+          const msg = pendingRetryMessageRef.current;
+          clearPendingRetry();
+          // Small delay so compression SSE pipeline flushes before next send.
+          setTimeout(() => {
+            sendMessageRef.current?.(msg);
+          }, 100);
+        }
+      }
+    };
+    window.addEventListener('context-compressed', handler);
+    return () => window.removeEventListener('context-compressed', handler);
+  }, [sessionId]);
+
+  // Phase 1b — TerminalReason action state
+  // Refs (not state) so the context-compressed handler above can read the
+  // latest value without re-subscribing.
+  const pendingRetryAfterCompactRef = useRef(false);
+  const pendingRetryMessageRef = useRef<string | null>(null);
+  /** Timeout handle so we don't leak a pending retry if /compact never
+   *  emits context-compressed (e.g. network error, user cancels). */
+  const pendingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True for the synchronous window where compress_and_retry is arming
+   *  its own /compact call. Used by the sendMessage wrapper to avoid
+   *  clearing the pending state we just set. Resets to false right after
+   *  the sendMessageRef call returns (sendMessage runs its synchronous
+   *  prefix — including the wrapper's stale-retry check — before the
+   *  control returns here). */
+  const retryArmingInProgressRef = useRef(false);
+
+  const clearPendingRetry = useCallback(() => {
+    pendingRetryAfterCompactRef.current = false;
+    pendingRetryMessageRef.current = null;
+    if (pendingRetryTimerRef.current) {
+      clearTimeout(pendingRetryTimerRef.current);
+      pendingRetryTimerRef.current = null;
+    }
+  }, []);
+
+  // Safety: drop any pending retry state on session switch — stale
+  // cross-session replay would be nonsense.
+  useEffect(() => {
+    clearPendingRetry();
+  }, [sessionId, clearPendingRetry]);
+  const [pendingTerminalAction, setPendingTerminalAction] = useState<{
+    actionId: import('./TerminalReasonChip').TerminalActionId;
+    lastUserMessage: string;
+  } | null>(null);
+  // Phase 2 — user can dismiss the rate-limit banner; keeps it from
+  // re-rendering on snapshot updates within the same session. Resets on
+  // session switch because the snapshot state itself resets.
+  const [rateLimitDismissed, setRateLimitDismissed] = useState(false);
+  useEffect(() => { setRateLimitDismissed(false); }, [sessionId]);
+
+  // Find the most recent user message — replay target for retry actions.
+  const findLastUserMessage = useCallback((): string | null => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].content;
+    }
+    return null;
+  }, [messages]);
+
+  // Execute an action after confirmation (or immediately for non-destructive ones).
+  const runTerminalAction = useCallback((actionId: import('./TerminalReasonChip').TerminalActionId, lastUserMessage: string | null) => {
+    switch (actionId) {
+      case 'compress_and_retry': {
+        if (!lastUserMessage) return;
+        // Arm the retry. Safety nets for stale-replay:
+        //   - 45s timeout (in case /compact never emits context-compressed)
+        //   - session switch clears it (useEffect with clearPendingRetry)
+        //   - any subsequent user-initiated sendMessage clears it
+        //     (including manual /compact or compress_only — per round-13
+        //     Codex review: we can't rely on content equality to
+        //     distinguish internal vs manual /compact since a user can
+        //     type /compact themselves)
+        pendingRetryAfterCompactRef.current = true;
+        pendingRetryMessageRef.current = lastUserMessage;
+        if (pendingRetryTimerRef.current) clearTimeout(pendingRetryTimerRef.current);
+        pendingRetryTimerRef.current = setTimeout(() => {
+          console.warn('[chat] compress-and-retry timed out — pending retry cleared');
+          clearPendingRetry();
+        }, 45_000);
+        // Mark the synchronous arming window so the sendMessage wrapper
+        // below skips its stale-retry clear on THIS call. The wrapper's
+        // check is synchronous (runs before the first await in
+        // sendMessage), so resetting the flag right after the call is
+        // sufficient — no microtask deferral needed.
+        retryArmingInProgressRef.current = true;
+        try {
+          sendMessageRef.current?.('/compact');
+        } finally {
+          retryArmingInProgressRef.current = false;
+        }
+        break;
+      }
+      case 'compress_only':
+        // User chose "just compress, don't replay" — drop any previously
+        // armed compress_and_retry so its pendingRetryMessage can't ride
+        // on THIS compact's context-compressed event.
+        clearPendingRetry();
+        sendMessageRef.current?.('/compact');
+        break;
+      case 'enable_1m_and_retry':
+        if (!lastUserMessage) return;
+        setContext1m(true);
+        // Persist per-provider so future sessions keep 1M until user opts out.
+        fetch(`/api/providers/options?providerId=${encodeURIComponent(currentProviderId || 'env')}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ options: { context_1m: true } }),
+        }).catch(() => {});
+        setTimeout(() => sendMessageRef.current?.(lastUserMessage), 50);
+        break;
+      case 'switch_to_sonnet': {
+        if (!lastUserMessage) return;
+        // Only downgrade to 'sonnet' if it actually exists in the current
+        // provider's catalog. In managed deployments without sonnet, keep the
+        // current model (don't pin a phantom) and just retry.
+        const sonnetTarget = availableModels.find(m => m.value === 'sonnet')?.value;
+        if (sonnetTarget) setCurrentModel(sonnetTarget);
+        setTimeout(() => sendMessageRef.current?.(lastUserMessage), 50);
+        break;
+      }
+      case 'continue_max_turns':
+        sendMessageRef.current?.('continue');
+        break;
+      case 'retry_simple':
+        if (!lastUserMessage) return;
+        sendMessageRef.current?.(lastUserMessage);
+        break;
+      case 'open_hook_settings':
+        router.push('/settings');
+        break;
+      case 'retry_image_upload':
+        // No attachments API exposure here yet — surface a toast nudging
+        // the user to re-drag the image. Full wire lands with Phase 2's
+        // attachment UX work.
+        import('@/hooks/useToast').then(({ showToast }) => {
+          showToast({ type: 'info', message: t('terminalAction.retryImageUpload' as TranslationKey), duration: 4000 });
+        }).catch(() => {});
+        break;
+    }
+  }, [currentProviderId, router, t, availableModels]);
+
+  // Entry point from the chip. Destructive actions route through confirm
+  // dialog; non-destructive ones run immediately.
+  const CONFIRM_REQUIRED = new Set<import('./TerminalReasonChip').TerminalActionId>([
+    'compress_and_retry',
+    'enable_1m_and_retry',
+    'switch_to_sonnet',
+    'retry_simple',
+  ]);
+
+  const handleTerminalAction = useCallback((actionId: import('./TerminalReasonChip').TerminalActionId) => {
+    const lastUserMessage = findLastUserMessage();
+    if (CONFIRM_REQUIRED.has(actionId) && lastUserMessage) {
+      setPendingTerminalAction({ actionId, lastUserMessage });
+    } else {
+      runTerminalAction(actionId, lastUserMessage);
+    }
+  }, [findLastUserMessage, runTerminalAction]);
+
+  const buildThinkingConfig = useCallback((): { type: string } | undefined => {
+    if (!thinkingMode || thinkingMode === 'adaptive') return { type: 'adaptive' };
+    if (thinkingMode === 'enabled') return { type: 'enabled' };
+    if (thinkingMode === 'disabled') return { type: 'disabled' };
+    return undefined;
+  }, [thinkingMode]);
+
+  const checkAssistantTrigger = useAssistantTrigger({
+    sessionId,
+    workingDirectory,
+    isStreaming,
+    mode,
+    currentModel,
+    currentProviderId,
+    initialMessages,
+    handleModeChange,
+    buildThinkingConfig,
+    sendMessageRef,
+    initMetaRef,
+  });
+
+  // Detect workspace mismatch
+  useEffect(() => {
+    if (!workingDirectory) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/settings/workspace');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+
+        if (data.path && workingDirectory !== data.path) {
+          setIsAssistantProject(false);
+          setIsAssistantWorkspace(false);
+          const inspectRes = await fetch(`/api/workspace/inspect?path=${encodeURIComponent(workingDirectory)}`);
+          if (!inspectRes.ok || cancelled) return;
+          const inspectData = await inspectRes.json();
+          if (inspectData.hasAssistantData) {
+            setWorkspaceMismatchPath(data.path);
+          } else {
+            setWorkspaceMismatchPath(null);
+          }
+        } else {
+          // workingDirectory matches assistant workspace path
+          const isAssistant = !!data.path;
+          setIsAssistantProject(isAssistant);
+          setWorkspaceMismatchPath(null);
+          setIsAssistantWorkspace(isAssistant);
+          // Default panel is now controlled by the user's "Default Side Panel" setting
+          // in chat/[id]/page.tsx — no longer force-override for assistant workspaces.
+          // Load assistant name for avatar display
+          if (data.path) {
+            try {
+              const summaryRes = await fetch('/api/workspace/summary');
+              if (summaryRes.ok && !cancelled) {
+                const summary = await summaryRes.json();
+                setAssistantName(summary.name || '');
+                // Store buddy emoji globally for MessageItem avatar rendering
+                // Store buddy info globally for MessageItem avatar rendering
+                (globalThis as Record<string, unknown>).__codepilot_buddy_info__ = summary.buddy
+                  ? { emoji: summary.buddy.emoji, species: summary.buddy.species, rarity: summary.buddy.rarity }
+                  : undefined;
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [workingDirectory]);
+
+  // Listen for workspace-switched events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.newPath && workingDirectory && workingDirectory === detail.oldPath) {
+        setWorkspaceMismatchPath(detail.newPath);
+      }
+    };
+    window.addEventListener('assistant-workspace-switched', handler);
+    return () => window.removeEventListener('assistant-workspace-switched', handler);
+  }, [workingDirectory]);
+
+  const handleOpenNewAssistant = useCallback(async () => {
+    try {
+      const model = typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') || '' : '';
+      const provider_id = typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-provider-id') || '' : '';
+      const res = await fetch('/api/workspace/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'checkin', model, provider_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.dispatchEvent(new CustomEvent('session-created'));
+        router.push(`/chat/${data.session.id}`);
+      }
+    } catch (e) {
+      console.error('[ChatView] Failed to open assistant session:', e);
+    }
+  }, [router]);
+
+  const loadEarlierMessages = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore || messages.length === 0) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const earliest = messages[0];
+      const earliestRowId = (earliest as Message & { _rowid?: number })._rowid;
+      if (!earliestRowId) return;
+      const res = await fetch(`/api/chat/sessions/${sessionId}/messages?limit=100&before=${earliestRowId}`);
+      if (!res.ok) return;
+      const data: MessagesResponse = await res.json();
+      setHasMore(data.hasMore ?? false);
+      if (data.messages.length > 0) {
+        setMessages(prev => {
+          const merged = [...data.messages, ...prev];
+          if (merged.length > MAX_MESSAGES_IN_MEMORY) {
+            // Trim newest messages off the tail — they'll be restored when
+            // the next append triggers cappedSetMessages (re-fetches from DB).
+            tailTrimmedRef.current = true;
+            return merged.slice(0, MAX_MESSAGES_IN_MEMORY);
+          }
+          return merged;
+        });
+      }
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [sessionId, messages, hasMore]);
+
+  /** Forward pagination for the deep-link window: fill the gap below the loaded tail. */
+  const loadLaterMessages = useCallback(async () => {
+    if (loadingLaterRef.current || !hasMoreAfter || messages.length === 0) return;
+    loadingLaterRef.current = true;
+    setLoadingLater(true);
+    try {
+      const latest = messages[messages.length - 1];
+      const latestRowId = (latest as Message & { _rowid?: number })._rowid;
+      if (!latestRowId) return;
+      const res = await fetch(`/api/chat/sessions/${sessionId}/messages?limit=100&after=${latestRowId}`);
+      if (!res.ok) return;
+      const data: MessagesResponse = await res.json();
+      const stillMore = data.hasMoreAfter ?? false;
+      setHasMoreAfter(stillMore);
+      // Tail reached the newest message — post-turn reconciliation no longer needed.
+      if (!stillMore) tailTrimmedRef.current = false;
+      if (data.messages.length > 0) {
+        // cappedSetMessages trims the head (oldest) on overflow and flips hasMore back on.
+        cappedSetMessages(prev => [...prev, ...data.messages]);
+      }
+    } finally {
+      loadingLaterRef.current = false;
+      setLoadingLater(false);
+    }
+  }, [sessionId, messages, hasMoreAfter, cappedSetMessages]);
+
+  const stopStreaming = useCallback(() => { stopStream(sessionId); }, [sessionId]);
+
+  const handlePermissionResponse = useCallback(
+    async (decision: 'allow' | 'allow_session' | 'deny', updatedInput?: Record<string, unknown>, denyMessage?: string) => {
+      setPendingApprovalSessionId('');
+      await respondToPermission(sessionId, decision, updatedInput, denyMessage);
+    },
+    [sessionId, setPendingApprovalSessionId]
+  );
+
+  /** Start an API stream for the given content. Does NOT add a user message to the list. */
+  const doStartStream = useCallback(
+    (content: string, files?: FileAttachment[], systemPromptAppend?: string, displayOverride?: string, mentions?: MentionRef[]) => {
+      const notices = pendingImageNoticesRef.current.length > 0
+        ? [...pendingImageNoticesRef.current]
+        : undefined;
+      if (notices) pendingImageNoticesRef.current = [];
+
+      startStream({
+        sessionId,
+        content,
+        mode,
+        model: currentModel,
+        providerId: currentProviderId,
+        files,
+        systemPromptAppend,
+        pendingImageNotices: notices,
+        // 'auto' sentinel means "no explicit effort" — filter it here so
+        // the CLI applies its per-model default (Opus 4.7 → xhigh, etc.)
+        effort: selectedEffort && selectedEffort !== 'auto' ? selectedEffort : undefined,
+        thinking: buildThinkingConfig(),
+        context1m,
+        displayOverride,
+        mentions,
+        onModeChanged: (sdkMode) => {
+          const uiMode = sdkMode === 'plan' ? 'plan' : 'code';
+          handleModeChange(uiMode);
+        },
+        sendMessageFn: (retryContent: string, retryFiles?: FileAttachment[]) => {
+          sendMessageRef.current?.(retryContent, retryFiles);
+        },
+        onInitMeta: (meta) => {
+          initMetaRef.current = meta;
+          console.log('[ChatView] SDK init meta received:', meta);
+        },
+      });
+    },
+    [sessionId, mode, currentModel, currentProviderId, selectedEffort, context1m, buildThinkingConfig, handleModeChange]
+  );
+
+  const sendMessage = useCallback(
+    async (content: string, files?: FileAttachment[], systemPromptAppend?: string, displayOverride?: string, mentions?: MentionRef[]) => {
+      const displayUserContent = displayOverride || content;
+      let displayContent = displayUserContent;
+      if (files && files.length > 0) {
+        displayContent = buildFilesDisplayContent(files, displayUserContent);
+      }
+
+      // Phase 1b safety: if a compress_and_retry is armed, drop it
+      // whenever the user sends ANY new content — including a manual
+      // /compact typed themselves or a "仅压缩" click. Without this, a
+      // retry queued by Action Chip would piggyback on a later
+      // user-initiated /compact's context-compressed event and replay
+      // the old lastUserMessage out of order.
+      //
+      // The retryArmingInProgressRef flag excludes the one
+      // synchronous call the compress_and_retry action itself makes
+      // through this wrapper — that call must NOT clear the state it
+      // just set. runTerminalAction flips the flag on before calling
+      // sendMessageRef and off again right after.
+      if (pendingRetryAfterCompactRef.current && !retryArmingInProgressRef.current) {
+        clearPendingRetry();
+      }
+
+      // Queue message if currently streaming — hold above input, send after completion
+      if (isStreaming) {
+        setMessageQueue((prev) => [...prev, { content, files, systemPromptAppend, displayOverride, mentions }]);
+        return;
+      }
+
+      const userMessage: Message = {
+        id: 'temp-' + Date.now(),
+        session_id: sessionId,
+        role: 'user',
+        content: displayContent,
+        created_at: new Date().toISOString(),
+        token_usage: null,
+      };
+      cappedSetMessages((prev) => [...prev, userMessage]);
+      doStartStream(content, files, systemPromptAppend, displayOverride, mentions);
+    },
+    [sessionId, isStreaming, doStartStream, cappedSetMessages]
+  );
+
+  sendMessageRef.current = sendMessage;
+
+  // ── Dequeue: when streaming finishes and queue is non-empty, send next ──
+  useEffect(() => {
+    if (!isStreaming && messageQueue.length > 0 && !dequeuingRef.current) {
+      dequeuingRef.current = true;
+      const [next, ...rest] = messageQueue;
+      setMessageQueue(rest);
+      // Add the queued message to the conversation as a normal user message
+      const displayUserContent = next.displayOverride || next.content;
+      let displayContent = displayUserContent;
+      if (next.files && next.files.length > 0) {
+        displayContent = buildFilesDisplayContent(next.files, displayUserContent);
+      }
+      const userMessage: Message = {
+        id: 'temp-' + Date.now(),
+        session_id: sessionId,
+        role: 'user',
+        content: displayContent,
+        created_at: new Date().toISOString(),
+        token_usage: null,
+      };
+      cappedSetMessages((prev) => [...prev, userMessage]);
+      doStartStream(next.content, next.files, next.systemPromptAppend, next.displayOverride, next.mentions);
+    }
+    if (isStreaming) {
+      dequeuingRef.current = false;
+    }
+  }, [isStreaming, messageQueue, doStartStream, cappedSetMessages, sessionId]);
+
+  // Expose widget drill-down bridge: widgets can call window.__widgetSendMessage(text)
+  // to trigger follow-up questions (e.g. clicking a node to get deeper explanation)
+  // Hardened: type-checked, length-limited, rate-limited, sanitized.
+  useEffect(() => {
+    let lastCallTime = 0;
+    const RATE_LIMIT_MS = 2000;
+    const MAX_LENGTH = 500;
+
+    const bridge = (text: unknown) => {
+      if (typeof text !== 'string') return;
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length > MAX_LENGTH) return;
+
+      // Rate limit: max one message per 2 seconds
+      const now = Date.now();
+      if (now - lastCallTime < RATE_LIMIT_MS) return;
+      lastCallTime = now;
+
+      sendMessageRef.current?.(trimmed);
+    };
+    (window as unknown as Record<string, unknown>).__widgetSendMessage = bridge;
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__widgetSendMessage;
+    };
+  }, []);
+
+  // Listen for widget pin requests from PinnableWidget buttons.
+  // The AI model receives the widget code + instructions and calls the
+  // codepilot_dashboard_pin MCP tool to complete the pin operation.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { widgetCode, title } = (e as CustomEvent).detail || {};
+      if (!widgetCode || !sendMessageRef.current) return;
+
+      const instruction = `请将下面的可视化组件固定到项目看板。\n\n标题建议：${title || 'Untitled'}\n\n组件代码：\n${widgetCode}`;
+      sendMessageRef.current(instruction, undefined, undefined, `📌 固定「${title || 'Widget'}」到看板`);
+    };
+    window.addEventListener('widget-pin-request', handler);
+    return () => window.removeEventListener('widget-pin-request', handler);
+  }, []);
+
+  // Listen for dashboard widget drilldown (click title → conversation)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { title, dataContract } = (e as CustomEvent).detail || {};
+      if (!title || !sendMessageRef.current) return;
+      sendMessageRef.current(
+        `请深入分析看板组件「${title}」的数据。\n数据契约：${dataContract || '无'}`,
+        undefined, undefined,
+        `🔍 分析「${title}」`,
+      );
+    };
+    window.addEventListener('dashboard-widget-drilldown', handler);
+    return () => window.removeEventListener('dashboard-widget-drilldown', handler);
+  }, []);
+
+  // Listen for dashboard command input
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text } = (e as CustomEvent).detail || {};
+      if (!text || !sendMessageRef.current) return;
+      sendMessageRef.current(text, undefined, undefined, text);
+    };
+    window.addEventListener('dashboard-command', handler);
+    return () => window.removeEventListener('dashboard-command', handler);
+  }, []);
+
+  const handleCommand = useChatCommands({ sessionId, messages, setMessages: cappedSetMessages, sendMessage });
+
+  // ── /btw side question (ephemeral popup, shared via useBtw) ──────
+  // Answered from the CURRENT conversation without a session lock and without
+  // persisting anything, so it runs concurrently with the main stream and leaves
+  // no trace. Context = snapshot of in-memory messages + in-flight streaming text
+  // (so the aside sees content not yet in the DB). The same hook powers the
+  // new-chat screen (app/chat/page.tsx) so /btw behaves identically there.
+  const btwGetContext = useCallback(() => {
+    const ctx = messages
+      .map((m) => ({
+        role: m.role,
+        content: parseMessageContent(m.content)
+          .filter((b) => b.type === 'text')
+          .map((b) => (b as { text: string }).text)
+          .join('\n')
+          .trim(),
+      }))
+      .filter((m) => m.content)
+      .slice(-40);
+    if (streamingContent && streamingContent.trim()) {
+      ctx.push({ role: 'assistant', content: streamingContent });
+    }
+    return ctx;
+  }, [messages, streamingContent]);
+  const btw = useBtw({ getContext: btwGetContext, model: currentModel, providerId: currentProviderId });
+
+  // Listen for image generation completion
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      const paths = (detail.images || [])
+        .map((img: { localPath?: string }) => img.localPath)
+        .filter(Boolean);
+      const pathInfo = paths.length > 0 ? `\nGenerated image file paths:\n${paths.map((p: string) => `- ${p}`).join('\n')}` : '';
+      const notice = `[Image generation completed]\n- Prompt: "${detail.prompt}"\n- Aspect ratio: ${detail.aspectRatio}\n- Resolution: ${detail.resolution}${pathInfo}`;
+
+      if (paths.length > 0) {
+        setLastGeneratedImages(sessionId, paths);
+      }
+
+      pendingImageNoticesRef.current.push(notice);
+
+      const dbNotice = `[__IMAGE_GEN_NOTICE__ prompt: "${detail.prompt}", aspect ratio: ${detail.aspectRatio}, resolution: ${detail.resolution}${paths.length > 0 ? `, file path: ${paths.join(', ')}` : ''}]`;
+      fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, role: 'user', content: dbNotice }),
+      }).catch(() => {});
+    };
+    window.addEventListener('image-gen-completed', handler);
+    return () => window.removeEventListener('image-gen-completed', handler);
+  }, [sessionId]);
+
+  return (
+    // 脱敏网关(D5):mapping 非空时,MessageResponse 渲染前做占位符→原文还原
+    <DeidRestoreContext.Provider value={deidRestoreFn}>
+    <div className="relative flex h-full min-h-0 flex-col">
+      {/* Workspace mismatch banner */}
+      {workspaceMismatchPath && (
+        <div className="flex items-center justify-between gap-3 border-b border-status-warning/30 bg-status-warning-muted px-4 py-2">
+          <span className="text-xs text-status-warning-foreground">
+            {t('assistant.switchedBanner', { path: workspaceMismatchPath })}
+          </span>
+          <Button
+            onClick={handleOpenNewAssistant}
+            className="shrink-0 rounded-md bg-status-warning px-3 py-1 text-xs font-medium text-white hover:bg-status-warning/80 transition-colors"
+          >
+            {t('assistant.openNewAssistant')}
+          </Button>
+        </div>
+      )}
+      <MessageList
+        messages={messages}
+        streamingContent={streamingContent}
+        isStreaming={isStreaming}
+        toolUses={toolUses}
+        toolResults={toolResults}
+        streamingBlocks={streamingBlocks}
+        streamingToolOutput={streamingToolOutput}
+        streamingThinkingContent={streamingThinkingContent}
+        statusText={statusText}
+        onForceStop={stopStreaming}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={loadEarlierMessages}
+        hasMoreAfter={hasMoreAfter}
+        loadingLater={loadingLater}
+        onLoadLater={loadLaterMessages}
+        targetMessageId={targetMessageId}
+        rewindPoints={rewindPoints}
+        sessionId={sessionId}
+        startedAt={streamSnapshot?.startedAt}
+        isAssistantProject={isAssistantProject}
+        assistantName={assistantName}
+        sandboxEnabled={sandboxEnabled}
+      />
+      {/* End-of-turn terminal reason chip (only shown when stream is not active) */}
+      {!isStreaming && (
+        <TerminalReasonChip
+          reason={streamSnapshot?.terminalReason}
+          errorCategory={streamSnapshot?.errorCategory}
+          onAction={handleTerminalAction}
+        />
+      )}
+      {/* Permission prompt */}
+      <PermissionPrompt
+        pendingPermission={pendingPermission}
+        permissionResolved={permissionResolved}
+        onPermissionResponse={handlePermissionResponse}
+        toolUses={toolUses}
+        permissionProfile={permissionProfile}
+      />
+      {/* Phase 1b — confirmation dialog for destructive chip actions */}
+      <AlertDialog
+        open={pendingTerminalAction !== null}
+        onOpenChange={(open) => { if (!open) setPendingTerminalAction(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('terminalAction.confirmTitle' as TranslationKey)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingTerminalAction?.actionId === 'compress_and_retry' && t('terminalAction.confirmCompressAndRetry' as TranslationKey)}
+              {pendingTerminalAction?.actionId === 'enable_1m_and_retry' && t('terminalAction.confirmEnable1mAndRetry' as TranslationKey)}
+              {pendingTerminalAction?.actionId === 'switch_to_sonnet' && t('terminalAction.confirmSwitchToSonnet' as TranslationKey)}
+              {pendingTerminalAction?.actionId === 'retry_simple' && t('terminalAction.confirmRetry' as TranslationKey)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('terminalAction.confirmCancel' as TranslationKey)}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingTerminalAction) {
+                runTerminalAction(pendingTerminalAction.actionId, pendingTerminalAction.lastUserMessage);
+                setPendingTerminalAction(null);
+              }
+            }}>
+              {t('terminalAction.confirmCta' as TranslationKey)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* Skill nudge banner — shown after complex multi-step workflows */}
+      {skillNudge && !isStreaming && (
+        <div className="mx-auto w-full max-w-3xl border-t border-border bg-background px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex-1 text-sm text-muted-foreground">
+              {t('skillNudge.message')
+                .replace('{step}', String(skillNudge.step))
+                .replace('{toolCount}', String(skillNudge.distinctToolCount))}
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() => {
+                  setSkillNudge(null);
+                  sendMessageRef.current?.(t('skillNudge.savePrompt'));
+                }}
+              >
+                {t('skillNudge.saveButton')}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSkillNudge(null)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                aria-label="Dismiss"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Batch image generation panels */}
+      <BatchExecutionDashboard />
+      <BatchContextSync />
+
+      {/* Queued message banner — shown above input when messages are waiting */}
+      {messageQueue.length > 0 && (
+        <div className="mx-auto w-full max-w-3xl px-4 pb-1">
+          {messageQueue.map((qm, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 mb-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" className="shrink-0 text-muted-foreground"><path fill="currentColor" d="M128 24a104 104 0 1 0 104 104A104.11 104.11 0 0 0 128 24Zm0 192a88 88 0 1 1 88-88a88.1 88.1 0 0 1-88 88Zm64-88a8 8 0 0 1-8 8H128a8 8 0 0 1-8-8V72a8 8 0 0 1 16 0v48h56a8 8 0 0 1 0 16Z"/></svg>
+              <span className="flex-1 truncate text-sm text-muted-foreground">
+                {(qm.displayOverride || qm.content).length > 80
+                  ? (qm.displayOverride || qm.content).slice(0, 77) + '...'
+                  : (qm.displayOverride || qm.content)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMessageQueue((prev) => prev.filter((_, idx) => idx !== i))}
+                className="shrink-0 rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground transition-colors"
+                aria-label={t('messageQueue.cancel' as TranslationKey)}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Phase 2 — subscription rate-limit banner (allowed_warning / rejected) */}
+      {!rateLimitDismissed && streamSnapshot?.rateLimitInfo && streamSnapshot.rateLimitInfo.status !== 'allowed' && (
+        <RateLimitBanner
+          info={streamSnapshot.rateLimitInfo}
+          onRequestSwitchToSonnet={() => {
+            const lastUserMessage = findLastUserMessage();
+            if (lastUserMessage) {
+              setPendingTerminalAction({ actionId: 'switch_to_sonnet', lastUserMessage });
+            } else {
+              const sonnetTarget = availableModels.find(m => m.value === 'sonnet')?.value;
+              if (sonnetTarget) setCurrentModel(sonnetTarget);
+            }
+          }}
+          onDismiss={() => setRateLimitDismissed(true)}
+        />
+      )}
+      {/* Cowork sandbox — VM provisioning progress during cold-start (P1-D) */}
+      {sandboxEnabled && (
+        <VmProvisioningBanner status={streamSnapshot?.vmStatus} />
+      )}
+      {/* Cowork sandbox — downloadable artifacts + skills used inside the VM.
+          skills 非空也要渲染:对话开头 agent 先读规范、尚无产物时,浮窗即出现 */}
+      {sandboxEnabled && (vmArtifacts.length > 0 || skillsUsed.length > 0) && (
+        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} skillsUsed={skillsUsed} />
+      )}
+      {/* M2 (镜像流水线): 沙箱资产未就绪 —— 禁发 + 进度/引导提示(D4) */}
+      {officeAssetsBlocked && (
+        <div className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-border/50 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-status-warning inline-block" />
+          {coworkAssets?.overall === 'downloading'
+            ? `${t('workspace.office.downloading')} ${coworkAssets.totalPct}%`
+            : t('workspace.office.sendBlocked')}
+        </div>
+      )}
+      <MessageInput
+        key={sessionId}
+        onSend={sendMessage}
+        onCommand={handleCommand}
+        onBtw={btw.ask}
+        onStop={stopStreaming}
+        disabled={officeAssetsBlocked}
+        isStreaming={isStreaming}
+        sessionId={sessionId}
+        modelName={currentModel}
+        onModelChange={setCurrentModel}
+        providerId={currentProviderId}
+        onProviderModelChange={handleProviderModelChange}
+        // E4 (cowork): 办公会话把 workingDirectory 传空 —— @ 引用/目录摘要/
+        // 项目斜杠展开引用的是宿主路径,对 VM 内的 agent 无意义,空串走
+        // MessageInput 既有的优雅降级;officeMode 另隐藏斜杠/CLI 按钮。
+        workingDirectory={sandboxEnabled ? '' : workingDirectory}
+        officeMode={sandboxEnabled}
+        deidEnabled={deidEnabled}
+        onDeidToggle={sandboxEnabled ? handleDeidToggle : undefined}
+        deidGate={sandboxEnabled ? deidGate.gate : undefined}
+        onAssistantTrigger={checkAssistantTrigger}
+        effort={selectedEffort}
+        onEffortChange={handleEffortChange}
+        sdkInitMeta={initMetaRef.current}
+        isAssistantProject={isAssistantProject}
+        hasMessages={messages.length > 0}
+      />
+      <ChatComposerActionBar
+        left={
+          // E4 (cowork): 办公会话隐藏 code/plan 切换 —— 计划模式是研发工作流。
+          sandboxEnabled
+            ? null
+            : <><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>
+        }
+        center={
+          // E4 (cowork): 办公会话隐藏权限选择器 —— 创建期已定 full_access
+          // (VM 隔离即权限故事,D3),无需/不应回合内切换。原 SandboxToggle
+          // 已移除:模式由侧边栏「办公/研发」双栏在建会话时定死(E3)。
+          // 办公模式改为在输入框下方居中展示出品标识(企业法定名称,各
+          // 语言环境不翻译);absolute 相对整条 bar 居中 = 相对输入框居中。
+          sandboxEnabled ? (
+            <span className="pointer-events-none absolute inset-x-0 top-0.5 bottom-2.5 flex select-none items-center justify-center text-xs text-muted-foreground/40">
+              招商局金融科技有限公司出品
+            </span>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <ChatPermissionSelector
+                sessionId={sessionId}
+                permissionProfile={permissionProfile}
+                onPermissionChange={setPermissionProfile}
+              />
+            </div>
+          )
+        }
+        right={
+          <RunCockpit
+            providerId={currentProviderId}
+            messages={messages}
+            modelName={currentModel}
+            context1m={context1m}
+            hasSummary={hasSummary}
+            upstreamModelId={currentModelUpstream}
+            modelContextWindow={currentModelContextWindow}
+            permissionProfile={permissionProfile}
+          />
+        }
+      />
+      {btw.open && (
+        <BtwPanel
+          messages={btw.messages}
+          loading={btw.loading}
+          error={btw.error}
+          onAsk={btw.ask}
+          onStop={btw.stop}
+          onClear={btw.clear}
+          onClose={() => btw.setOpen(false)}
+        />
+      )}
+      {/* 脱敏预览确认弹窗(deid-gateway,仅办公会话且开关开启时会被打开) */}
+      {sandboxEnabled && <DeidPreviewDialog {...deidGate.dialog} />}
+    </div>
+    </DeidRestoreContext.Provider>
+  );
+}

@@ -1,0 +1,397 @@
+import fs from 'fs';
+import path from 'path';
+import { atomicWriteText, sha256Hex, stableStringify, traceFile } from './script-artifacts';
+
+export interface ScriptTraceAction {
+  caseId: string;
+  sequence: number;
+  toolName: string;
+  playwrightCode?: string;
+  success: boolean;
+  usesMock: boolean;
+  timestampOffsetMs: number;
+}
+
+/**
+ * 执行当时从页面可访问性树观察到的一个具名元素。
+ *
+ * 存在的理由：轨迹的 `playwrightCode` 只覆盖【被操作过】的元素（MCP 已把它们解析成现成的
+ * `getByRole(...)`，无需再猜）。而断言常打在【只看过、没点过】的元素上（「验证头像上传框
+ * 可见」）——这类元素在轨迹里零记录，生成模型只能凭空捏定位器（真机踩坑：`.avatar-uploader`
+ * 之类组件库内部 class → 重放 element(s) not found）。快照元素清单就是给断言用的词汇表。
+ */
+export interface ObservedElement {
+  role: string;
+  name: string;
+}
+
+/** caseId → 该用例执行期间观察到的元素（并集去重）。 */
+export type ObservedElementsByCase = Record<string, ObservedElement[]>;
+
+export interface ScriptTraceFile {
+  version: 1;
+  taskName: string;
+  env: string;
+  runHash: string;
+  createdAt: string;
+  actions: ScriptTraceAction[];
+  elementsByCase: ObservedElementsByCase;
+}
+
+interface PendingTool {
+  caseId: string;
+  sequence: number;
+  toolName: string;
+  startedAt: number;
+}
+
+export interface TraceRedaction {
+  value: string | null | undefined;
+  replacement: string;
+}
+
+// NOTE: 与 markers.ts 的口径保持一致(容忍 `**@@CASE_START {...}**` 这类装饰)。这里贪婪
+// 到行内最后一个 `}`,对本模块只取 `id` 的用途足够;严格的 JSON 收割一律走 markers.ts。
+const TRACE_MARKER = /@@(CASE_START|RESULT)\s+(\{[^\r\n]*\})/g;
+
+export function extractPlaywrightCode(content: string): string | undefined {
+  const match = /### Ran Playwright code\s*\r?\n```(?:js|javascript|ts|typescript)?\r?\n([\s\S]*?)\r?\n```/i.exec(content);
+  return match?.[1]?.trim() || undefined;
+}
+
+/** 单条用例最多留存的元素数（大页面的 aria 树可上千行，全存会撑爆 trace 与生成 payload）。 */
+const MAX_ELEMENTS_PER_CASE = 120;
+/** 元素 name 截断长度（Playwright 自身对 >900 字符的 name 就不渲染了，这里给断言留够即可）。 */
+const MAX_ELEMENT_NAME = 100;
+
+/** 读快照文件的大小上限（大页面 aria 树可到数百 KB；元素数另有 MAX_ELEMENTS_PER_CASE 兜底）。 */
+const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+
+/**
+ * 一次 tool_result 里 aria 快照的所在位置。
+ *
+ * 真机（3.2.1 打包版 + @playwright/mcp，2026-07-17 实测）里【内联形态几乎不出现】，实际是这三种：
+ *   1. `file`     —— `browser_navigate` 等自动快照。因 MCP 配了 `--output-dir`（prompts.ts），
+ *                    快照落到证据目录，节里只留 `- [Snapshot](AI_LabTest/report/_evidence/…/page-*.yml)`；
+ *   2. `persisted` —— 显式 `browser_snapshot` 返回内联 YAML，但体量大（实测 352KB）被 SDK 截断成
+ *                    `<persisted-output>` 包装 + 2KB 预览，全文另存到 tool-results 缓存 JSON；
+ *   3. `inline`   —— 小页面/其他配置下的原始内联形态。
+ *
+ * 初版只认 inline、把 file 当"拿不到就算了"，真机结果是**一个元素都收不到**（trace 里 elements
+ * 行为 0）——判断反了：file 才是主路径。故这里三种全认。
+ */
+export type AriaSnapshotRef =
+  | { kind: 'inline'; yaml: string }
+  | { kind: 'file'; relPath: string }
+  | { kind: 'persisted'; absPath: string };
+
+/** 定位 tool_result 里的 aria 快照（不读盘，纯解析——便于确定性单测）。 */
+export function locateAriaSnapshot(content: string): AriaSnapshotRef | undefined {
+  const inline = /### Snapshot\s*\r?\n```(?:yaml|yml)?\r?\n([\s\S]*?)\r?\n```/i.exec(content);
+  if (inline?.[1]?.trim()) return { kind: 'inline', yaml: inline[1].trim() };
+
+  // `### Snapshot\n- [Snapshot](AI_LabTest/report/_evidence/…/page-….yml)`
+  const link = /### Snapshot\s*\r?\n\s*-\s*\[[^\]]*\]\(([^)\s]+\.ya?ml)\)/i.exec(content);
+  if (link?.[1]) return { kind: 'file', relPath: link[1] };
+
+  // `<persisted-output>\nOutput too large (…). Full output saved to: /abs/path.json`
+  // 只在预览里确实出现 Snapshot 节时才去读——避免为无关的大输出（读文件等）白读一次盘。
+  if (content.startsWith('<persisted-output>') && /###\s*Snapshot/.test(content)) {
+    const saved = /Full output saved to:\s*(\S+\.json)/i.exec(content);
+    if (saved?.[1]) return { kind: 'persisted', absPath: saved[1] };
+  }
+  return undefined;
+}
+
+/** 从 SDK 的 tool-results 缓存 JSON（`[{type:'text',text:'…'}]`）里拼出原始文本。 */
+function readPersistedText(absPath: string): string | undefined {
+  try {
+    if (!path.isAbsolute(absPath)) return undefined;
+    if (fs.statSync(absPath).size > MAX_SNAPSHOT_BYTES) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(absPath, 'utf-8')) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((p) => (p && typeof p === 'object' && typeof (p as { text?: unknown }).text === 'string'
+          ? (p as { text: string }).text : ''))
+        .join('');
+    }
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;   // 缓存被清理/格式变更 → 退回"没有清单"，不影响任何既有行为
+  }
+}
+
+/**
+ * 解析出 aria 树 YAML（必要时读盘）。
+ *
+ * `projectPath` 缺省时不解析 file 形态——文件链接是项目相对路径，没有根就无从校验安全性。
+ */
+export function extractAriaSnapshot(content: string, projectPath?: string): string | undefined {
+  const ref = locateAriaSnapshot(content);
+  if (!ref) return undefined;
+  if (ref.kind === 'inline') return ref.yaml;
+
+  if (ref.kind === 'file') {
+    if (!projectPath) return undefined;
+    try {
+      const root = path.resolve(projectPath);
+      const file = path.resolve(root, ref.relPath);
+      // 路径来自 MCP 输出，按不可信处理：必须落在项目根内（与 script-runner 同款口径）。
+      if (!file.startsWith(root + path.sep)) return undefined;
+      if (fs.statSync(file).size > MAX_SNAPSHOT_BYTES) return undefined;
+      return fs.readFileSync(file, 'utf-8').trim() || undefined;
+    } catch {
+      return undefined;   // 快照文件被清理/竞态 → 当作没有清单
+    }
+  }
+
+  const text = readPersistedText(ref.absPath);
+  if (!text) return undefined;
+  // 缓存里是完整的分节文本，其中的快照必为内联形态。
+  const inline = /### Snapshot\s*\r?\n```(?:yaml|yml)?\r?\n([\s\S]*?)\r?\n```/i.exec(text);
+  return inline?.[1]?.trim() || undefined;
+}
+
+// aria 树的具名元素行：`- button "+ 新建学科" [ref=e12] [cursor=pointer]`。
+// 无 name 的行（`- generic [ref=e1]`）与文本行（`- text: …`）不匹配——前者对断言无价值且量极大，
+// 后者不是元素。role 只取首个 token；name 内的 YAML 转义在下面还原。
+const SNAPSHOT_ELEMENT_LINE = /^\s*-\s+([a-zA-Z][\w-]*)\s+"((?:[^"\\]|\\.)*)"/;
+
+/** 从 aria 树 YAML 解析出具名元素（role + name），保序去重。 */
+export function parseSnapshotElements(snapshot: string): ObservedElement[] {
+  const seen = new Set<string>();
+  const out: ObservedElement[] = [];
+  for (const line of snapshot.split(/\r?\n/)) {
+    const match = SNAPSHOT_ELEMENT_LINE.exec(line);
+    if (!match) continue;
+    const role = match[1];
+    // YAML 双引号串的转义还原（`\"` → `"`、`\\` → `\`）。
+    const name = match[2].replace(/\\(.)/g, '$1').slice(0, MAX_ELEMENT_NAME);
+    if (!name.trim()) continue;
+    const key = `${role}\0${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ role, name });
+  }
+  return out;
+}
+
+export function redactTraceText(value: string, redactions: TraceRedaction[]): string {
+  let out = value;
+  for (const item of redactions) {
+    if (!item.value) continue;
+    out = out.split(item.value).join(item.replacement);
+  }
+  out = out
+    .replace(/(authorization\s*[:=]\s*["']?)(bearer\s+)?[^"'\s,;}]+/gi, '$1$2${AUTH_TOKEN}')
+    .replace(/((?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=]\s*["'])[^"']+(["'])/gi, '$1${SECRET}$2')
+    .replace(/([?&](?:token|access_token|refresh_token|api_key)=)[^&#\s]+/gi, '$1${SECRET}');
+  return out;
+}
+
+export class ScriptTraceCollector {
+  private activeCaseId = '';
+  private textBuffer = '';
+  private markerScanOffset = 0;
+  private sequenceByCase = new Map<string, number>();
+  private pending = new Map<string, PendingTool>();
+  private actions: ScriptTraceAction[] = [];
+  // caseId → (role+name → 元素)。按用例取并集：快照的 ref 会随代际失效，但"这条用例执行期间
+  // 页面上存在过哪些元素"作为断言词汇表是跨快照累积才完整的。
+  private elementsByCase = new Map<string, Map<string, ObservedElement>>();
+
+  constructor(
+    private readonly runStartMs: number,
+    private readonly redactions: TraceRedaction[] = [],
+    /**
+     * 被测项目根。快照多以【项目相对路径的文件链接】形态出现（MCP 配了 --output-dir），
+     * 没有根就无从解析、也无从做安全校验 —— 缺省时只认内联/persisted 形态。
+     */
+    private readonly projectPath?: string,
+  ) {}
+
+  feedText(chunk: string): void {
+    this.textBuffer += chunk;
+    TRACE_MARKER.lastIndex = this.markerScanOffset;
+    let processedThrough = this.markerScanOffset;
+    for (;;) {
+      const match = TRACE_MARKER.exec(this.textBuffer);
+      if (!match) break;
+      processedThrough = TRACE_MARKER.lastIndex;
+      try {
+        const value = JSON.parse(match[2]) as { id?: unknown };
+        if (typeof value.id !== 'string' || !value.id.trim()) continue;
+        const id = value.id.trim();
+        if (match[1] === 'CASE_START') this.activeCaseId = id;
+        else if (id === this.activeCaseId) this.activeCaseId = '';
+      } catch { /* malformed marker: consume it once and continue */ }
+    }
+    this.markerScanOffset = processedThrough;
+    // Bound memory without dropping a marker that may be split across stream chunks.
+    if (this.textBuffer.length > 32_768) {
+      const drop = Math.min(this.markerScanOffset, this.textBuffer.length - 16_384);
+      if (drop > 0) {
+        this.textBuffer = this.textBuffer.slice(drop);
+        this.markerScanOffset -= drop;
+      }
+    }
+  }
+
+  feedToolUse(raw: unknown): void {
+    const value = raw as { id?: unknown; name?: unknown };
+    if (!this.activeCaseId || typeof value.id !== 'string' || typeof value.name !== 'string') return;
+    if (!/browser_/i.test(value.name)) return;
+    const next = (this.sequenceByCase.get(this.activeCaseId) ?? 0) + 1;
+    this.sequenceByCase.set(this.activeCaseId, next);
+    this.pending.set(value.id, {
+      caseId: this.activeCaseId,
+      sequence: next,
+      toolName: value.name,
+      startedAt: Date.now(),
+    });
+  }
+
+  /** 快照元素并入该用例的词汇表（去重 + 上限截断）。 */
+  private collectElements(caseId: string, content: string): void {
+    // 传【未脱敏】的原文:脱敏会改写路径里的项目根(${PROJECT_ROOT})、令文件链接无法解析。
+    // 元素文本自身的脱敏在下面单独做 —— 词汇表里可能有账号名之类。
+    const snapshot = extractAriaSnapshot(content, this.projectPath);
+    if (!snapshot) return;
+    let bucket = this.elementsByCase.get(caseId);
+    if (!bucket) {
+      bucket = new Map<string, ObservedElement>();
+      this.elementsByCase.set(caseId, bucket);
+    }
+    for (const raw of parseSnapshotElements(snapshot)) {
+      if (bucket.size >= MAX_ELEMENTS_PER_CASE) break;
+      // 元素文本单独脱敏(快照里可能有账号名等)——原先靠"喂进来的 content 已脱敏"间接达成,
+      // 现在解析走原文,必须在这里显式做。
+      const element = { role: raw.role, name: redactTraceText(raw.name, this.redactions) };
+      const key = `${element.role} ${element.name}`;
+      if (!bucket.has(key)) bucket.set(key, element);
+    }
+  }
+
+  feedToolResult(raw: unknown): void {
+    const value = raw as { tool_use_id?: unknown; content?: unknown; is_error?: unknown };
+    if (typeof value.tool_use_id !== 'string') return;
+    const pending = this.pending.get(value.tool_use_id);
+    if (!pending) return;
+    this.pending.delete(value.tool_use_id);
+    const rawContent = typeof value.content === 'string' ? value.content : '';
+    const content = rawContent ? redactTraceText(rawContent, this.redactions) : '';
+    const code = extractPlaywrightCode(content);
+    // 快照不止出现在 browser_snapshot 的响应里——browser_click 等 input 型工具也会
+    // setIncludeSnapshot()，所以对每个 result 都试着抽。用【原文】:脱敏会改写路径,
+    // 令文件链接/persisted 路径失效(元素文本在 collectElements 内单独脱敏)。
+    this.collectElements(pending.caseId, rawContent);
+    this.actions.push({
+      caseId: pending.caseId,
+      sequence: pending.sequence,
+      toolName: pending.toolName,
+      ...(code ? { playwrightCode: code } : {}),
+      success: value.is_error !== true,
+      usesMock: /browser_(?:un)?route/i.test(pending.toolName),
+      timestampOffsetMs: Math.max(0, pending.startedAt - this.runStartMs),
+    });
+  }
+
+  finish(): ScriptTraceAction[] {
+    return [...this.actions].sort((a, b) => a.caseId.localeCompare(b.caseId) || a.sequence - b.sequence);
+  }
+
+  /**
+   * 取某条用例【当前已收集】的操作(逐条增量生成用:@@RESULT 一落就拿走该用例的轨迹去生成,
+   * 不等整轮结束)。刻意【不清空】——finish() 仍须返回全量,收口写 trace 文件的口径不变。
+   * 调用时机在该用例的 @@RESULT 之后,此时它的工具调用都已回执,拿到的就是完整轨迹。
+   */
+  drainCase(caseId: string): ScriptTraceAction[] {
+    return this.actions
+      .filter((action) => action.caseId === caseId)
+      .sort((a, b) => a.sequence - b.sequence);
+  }
+
+  /** 取某条用例当前已观察到的元素清单(逐条增量生成用)。 */
+  elementsForCase(caseId: string): ObservedElement[] {
+    return [...(this.elementsByCase.get(caseId)?.values() ?? [])];
+  }
+
+  /** 各用例观察到的元素词汇表（供生成模型写断言）。 */
+  finishElements(): ObservedElementsByCase {
+    const out: ObservedElementsByCase = {};
+    for (const [caseId, bucket] of [...this.elementsByCase].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (bucket.size) out[caseId] = [...bucket.values()];
+    }
+    return out;
+  }
+}
+
+export function normalizedTraceHash(actions: ScriptTraceAction[]): string {
+  const normalized = actions.map(({ caseId, sequence, toolName, playwrightCode, success, usesMock }) => ({
+    caseId,
+    sequence,
+    toolName,
+    playwrightCode: playwrightCode?.replace(/\s+/g, ' ').trim(),
+    success,
+    usesMock,
+  }));
+  return sha256Hex(stableStringify(normalized));
+}
+
+export function writeTraceFile(
+  projectPath: string,
+  taskName: string,
+  env: string,
+  runHash: string,
+  actions: ScriptTraceAction[],
+  elementsByCase: ObservedElementsByCase = {},
+): void {
+  const header = { type: 'header', version: 1, taskName, env, runHash, createdAt: new Date().toISOString() };
+  const lines = [
+    JSON.stringify(header),
+    ...actions.map((action) => JSON.stringify({ type: 'action', ...action })),
+    // 新行类型：旧读者按 type 过滤，天然忽略；新读者据此还原断言词汇表。
+    ...Object.entries(elementsByCase).map(([caseId, items]) => JSON.stringify({ type: 'elements', caseId, items })),
+  ];
+  atomicWriteText(traceFile(projectPath, taskName, env), lines.join('\n') + '\n');
+}
+
+export function readTraceFile(projectPath: string, taskName: string, env: string): ScriptTraceFile | null {
+  try {
+    const lines = fs.readFileSync(traceFile(projectPath, taskName, env), 'utf-8').split('\n').filter(Boolean);
+    if (!lines.length) return null;
+    const header = JSON.parse(lines[0]) as Record<string, unknown>;
+    if (header.type !== 'header' || header.version !== 1) return null;
+    const actions: ScriptTraceAction[] = [];
+    const elementsByCase: ObservedElementsByCase = {};
+    for (const line of lines.slice(1)) {
+      try {
+        const value = JSON.parse(line) as Record<string, unknown>;
+        if (value.type === 'action' && typeof value.caseId === 'string' && typeof value.sequence === 'number') {
+          const { type: _type, ...action } = value;
+          void _type;
+          actions.push(action as unknown as ScriptTraceAction);
+        } else if (value.type === 'elements' && typeof value.caseId === 'string' && Array.isArray(value.items)) {
+          const items = value.items.filter(
+            (it): it is ObservedElement =>
+              !!it && typeof it === 'object'
+              && typeof (it as ObservedElement).role === 'string'
+              && typeof (it as ObservedElement).name === 'string',
+          );
+          if (items.length) elementsByCase[value.caseId] = items;
+        }
+      } catch { /* skip malformed line */ }
+    }
+    return {
+      version: 1,
+      taskName: String(header.taskName ?? ''),
+      env: String(header.env ?? ''),
+      runHash: String(header.runHash ?? ''),
+      createdAt: String(header.createdAt ?? ''),
+      actions,
+      elementsByCase,
+    };
+  } catch {
+    return null;
+  }
+}

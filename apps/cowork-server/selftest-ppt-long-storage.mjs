@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {gzipSync} from 'node:zlib';
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-long-storage-'));
+process.env.COWORK_STATE_DIR = directory;
+const store = await import('./lib/ppt-store.mjs');
+const uid = 'long-deck-test';
+const id = store.newId();
+try {
+  const project = { id, uid, title: '100 slides', updatedAt: '', slides: [] };
+  store.save(project);
+  assert.equal(store.get(uid, id).title, project.title);
+  const image = 'data:image/png;base64,' + 'a'.repeat(30_000);
+  project.slides = Array.from({ length: 100 }, (_, index) => ({ id: `s${index}`, image, text: `页 ${index}` }));
+  store.save(project);
+  const target = path.join(directory, 'ppt', uid, `${id}.json`);
+  assert.ok(fs.existsSync(target), 'media references keep snapshot small without gzip');
+  assert.ok(fs.statSync(target).size < 100_000, 'repeated native media should be stored once');
+  assert.deepEqual(store.get(uid, id), project);
+  assert.equal(store.list(uid).length, 1);
+  assert.equal(fs.readdirSync(path.join(directory, 'ppt', uid, 'assets')).length, 1, 'one immutable media blob');
+  const restored = store.get(uid, id); restored.slides[0].text = 'changed';
+  assert.notEqual(store.get(uid,id).slides[0].text, 'changed', 'reads must not share mutable project state');
+  let projectionReads=0;
+  const projectSummary=value=>{projectionReads++;return {id:value.id,uid:value.uid,title:value.title,updatedAt:value.updatedAt};};
+  const first=store.getProjected(uid,id,'test-summary',projectSummary);first.title='caller edit';
+  assert.notEqual(store.getProjected(uid,id,'test-summary',projectSummary).title,'caller edit');assert.equal(projectionReads,1,'unchanged native deck is projected once');
+  project.title='Changed';store.save(project);
+  assert.equal(store.listProjected(uid,'test-summary',projectSummary)[0].title,'Changed');assert.equal(projectionReads,2,'saving invalidates the cached projection');
+  const stored=path.join(directory,'ppt',uid,id+'.json.gz');
+  const envelope=JSON.parse(fs.readFileSync(target,'utf8'));envelope.project.title='External atomic save';
+  const temp=stored+'.external';fs.writeFileSync(temp,gzipSync(JSON.stringify(envelope)));fs.renameSync(temp,stored);fs.unlinkSync(target);
+  assert.equal(store.getProjected(uid,id,'test-summary',projectSummary).title,'External atomic save');assert.equal(projectionReads,3,'another process replacing the file invalidates by stat identity');
+  store.save({...project,uid:'other-account',title:'Other account'});
+  assert.equal(store.getProjected('other-account',id,'test-summary',projectSummary).title,'Other account');
+  assert.equal(store.getProjected(uid,id,'test-summary',projectSummary).title,'External atomic save');
+  store.remove('other-account',id);
+  store.remove(uid, id);
+  assert.equal(store.getProjected(uid,id,'test-summary',projectSummary),null,'deletion invalidates projections');
+  assert.equal(store.get(uid, id), null);
+  assert.equal(store.collectUnusedMedia(uid, { graceMs: 0 }).removed.length, 1);
+  store.collectUnusedMedia(uid, { graceMs: 0, dryRun: false });
+  assert.equal(fs.readdirSync(path.join(directory, 'ppt', uid, 'assets')).length, 0);
+  console.log('PPT large snapshot compression, recovery, list and deletion: OK');
+} finally { fs.rmSync(directory, { recursive: true, force: true }); }

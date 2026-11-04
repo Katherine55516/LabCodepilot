@@ -1,0 +1,35 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- test-controlled transport snapshots */
+import {test,expect} from '@playwright/test';
+import{pptParityFixture}from'../fixtures/ppt-parity';
+test('blocking source capacity is translated and cannot be confirmed unchanged @smoke',async({page},info)=>{
+ const f=pptParityFixture(),id='9'.repeat(32),p:any=f.projects.get(id)!;p.status='outline_ready';p.outlineCorrections={version:1,items:[],summary:[],warnings:[{code:'planned_frozen_source_capacity',pageIndex:2,blocking:true,resolution:'repartition_source_before_confirmation',details:{fontSizePt:18,availableHeightInches:5.03,usedHeightInches:10.328666885389326}}]};
+ await page.route('**/api/**',async route=>{const req=route.request(),v=await f.handle(req.method(),new URL(req.url()).pathname,req.postData()?req.postDataJSON():{});if(!v)return route.continue();return route.fulfill({status:v.status,contentType:v.contentType||'application/json',body:typeof v.body==='string'?v.body:JSON.stringify(v.body)});});
+ await page.goto('/ppt?projectId='+id);const report=page.getByTestId('ppt-outline-corrections');await expect(report).toContainText('大纲仍需调整，暂不能生成');await expect(report).toContainText('保留当前页数重新校验');await expect(report).not.toContainText('ppt.outlineFix.');await expect(page.getByRole('button',{name:'确认并生成',exact:true})).toBeDisabled();
+ await expect(report.getByTestId('ppt-capacity-measurement')).toContainText('正文字号 18 pt');await expect(report).toContainText('内容高度 10.33 英寸，可用 5.03 英寸');await expect(report).toContainText('第 3 页');
+ const cdp=await page.context().newCDPSession(page);await cdp.send('Page.enable');await cdp.detach();await page.screenshot({path:info.outputPath('capacity-page-measurement.png'),fullPage:true});
+ await page.getByRole('textbox',{name:'页面重点 3',exact:true}).fill('Repartition the source objects and validate the changed outline');await expect(page.getByRole('button',{name:'确认并生成',exact:true})).toBeEnabled();
+});
+test('local capacity diagnostics separate successful call telemetry and explain the actual template constraint @smoke',async({page})=>{
+ const f=pptParityFixture(),id='9'.repeat(32),p:any=f.projects.get(id)!;p.status='failed';p.stage='outline';p.error='native_template_coverage_capacity: original template page 5 has no usable content slot';p.failure={stage:'outline',code:'capacity_invalid',model:'qwen3.8-max',diagnostic:{origin:'local'}};p.modelUsage=[{stage:'outline',telemetry:{finishReason:'stop',firstTokenMs:4199,inputTokens:22007}}];
+ await page.route('**/api/**',async route=>{const req=route.request(),v=await f.handle(req.method(),new URL(req.url()).pathname,req.postData()?req.postDataJSON():{});if(!v)return route.continue();return route.fulfill({status:v.status,contentType:v.contentType||'application/json',body:typeof v.body==='string'?v.body:JSON.stringify(v.body)});});
+ await page.goto('/ppt?projectId='+id);await page.getByRole('button',{name:'知道了',exact:true}).click({timeout:3000}).catch(()=>{});const d=page.getByTestId('ppt-outline-diagnostic');await expect(d).toHaveAttribute('data-failure-origin','local_capacity');await expect(d.getByTestId('ppt-failure-origin')).toBeVisible();await expect(d.locator('details').filter({hasText:/22007/})).not.toHaveAttribute('open','');await d.getByText(/最后一次模型调用|Last model call/).click();await expect(d).toContainText('22007');await d.getByText(/查看原始诊断|View raw diagnostics/).click();await expect(d).toContainText('original template page 5');
+});
+test('streaming native draft grows, queued templates stay hidden, and other-page revisions preserve the completed canvas @smoke',async({page},info)=>{
+ const f=pptParityFixture(),id='9'.repeat(32),p:any=f.projects.get(id)!;let seq=1;let text='The model is writing';
+ for(const [key,n]of Object.entries(p.nodes) as any){n.status=key==='s0'?'done':key==='s1'?'running':'pending';p.runtime.slides[key].phase=key==='s0'?'render_ready':'content';}
+ p.generationStages={pages:{s0:'ready',s1:'writing'},deck:'writing'};p.editing.epochs={s1:0};
+ const draft=()=>({title:'Actual streaming title',blocks:[],typing:text,chars:text.length,seq,jobId:'job',epoch:0,runId:p.currentRunId});
+ await page.route('**/api/**',async route=>{const req=route.request(),path=new URL(req.url()).pathname;
+  if(path===`/api/ppt/projects/${id}/events`){p.drafts={s1:draft()};return route.fulfill({status:200,contentType:'text/event-stream',body:`event: snapshot\ndata: ${JSON.stringify({project:p,run:{lastSeq:seq}})}\n\nevent: draft\ndata: ${JSON.stringify({slideId:'s1',draft:{...draft(),seq:seq-1,typing:'stale transport'}})}\n\n`});}
+  const v=await f.handle(req.method(),path,req.postData()?req.postDataJSON():{});if(!v)return route.continue();return route.fulfill({status:v.status,contentType:v.contentType||'application/json',body:typeof v.body==='string'?v.body:JSON.stringify(v.body)});
+ });
+ await page.goto('/ppt?projectId='+id);const canvas=page.locator('#ppt-editor-canvas'),draftPage=page.getByTestId('ppt-generation-skeleton');await expect(canvas.locator('article')).toHaveCount(2);await expect(draftPage).toContainText(text);await expect(draftPage).not.toContainText('stale transport');
+ const retained=await canvas.locator('[data-render-slide-id="render0"] div[tabindex="0"]').elementHandle();expect(retained).not.toBeNull();
+ text+=' and the same paragraph now contains more words 中文逐步增加';seq+=2;p.revision++;
+ await expect(draftPage).toContainText(text,{timeout:15000});expect(await retained!.evaluate(e=>e.isConnected)).toBe(true);await expect(canvas.locator('article')).toHaveCount(2);await expect(page.getByTestId('ppt-planned-pages')).toBeVisible();await page.screenshot({path:info.outputPath('growing-draft-stable-canvas.png')});
+});
+test('first writer displays growing text before a render tree is available, even with a pre-bound native preview @smoke',async({page})=>{
+ const f=pptParityFixture(),id='9'.repeat(32),p:any=f.projects.get(id)!;p.renderTree=null;p.nodes.s0.status='running';p.generationStages={pages:{s0:'writing'},deck:'writing'};p.drafts={s0:{title:'First real writing',typing:'Visible partial prose before native binding',chars:43,seq:1,jobId:'first',runId:p.currentRunId,epoch:0}};
+ await page.route('**/api/**',async route=>{const req=route.request(),path=new URL(req.url()).pathname;if(path===`/api/ppt/projects/${id}/events`)return route.fulfill({status:200,contentType:'text/event-stream',body:`event: snapshot\ndata: ${JSON.stringify({project:p,run:{lastSeq:1}})}\n\n`});const v=await f.handle(req.method(),path,req.postData()?req.postDataJSON():{});if(!v)return route.continue();return route.fulfill({status:v.status,contentType:v.contentType||'application/json',body:typeof v.body==='string'?v.body:JSON.stringify(v.body)});});
+ await page.goto('/ppt?projectId='+id);await expect(page.getByTestId('ppt-generation-skeleton')).toContainText('Visible partial prose before native binding');await expect(page.getByTestId('ppt-generation-monitor').getByRole('button',{name:/Source-backed point 12/})).toHaveCount(0);
+});

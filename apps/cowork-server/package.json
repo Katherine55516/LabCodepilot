@@ -1,0 +1,53 @@
+{
+  "name": "cowork-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cowork 远程容器沙箱服务端控制面(容器 per 会话编排 + exec WS 桥 + 凭证代理)。单公司裸金属服务器部署。",
+  "bin": {
+    "cowork-server": "index.mjs"
+  },
+  "scripts": {
+    "selftest:ppt-copy-media-integrity": "node selftest-ppt-copy-media-integrity.mjs",
+    "selftest:ppt-export-integrity": "node selftest-ppt-export-integrity.mjs",
+    "start": "node index.mjs",
+    "selftest": "node selftest-r1.mjs",
+    "selftest:ppt-density": "node selftest-ppt-density.mjs",
+    "selftest:ppt-source-arithmetic-warning": "node selftest-ppt-source-arithmetic-warning.mjs",
+    "selftest:ppt-table-min-rows": "node selftest-ppt-table-min-rows.mjs",
+    "selftest:ppt-math-upright": "node selftest-ppt-math-upright.mjs",
+    "selftest:ppt-builder-mark": "node selftest-ppt-builder-mark.mjs",
+    "selftest:ppt-density-audit": "node selftest-ppt-density-audit.mjs",
+    "selftest:ppt": "node selftest-ppt.mjs",
+    "selftest:ppt-m2": "node selftest-ppt-m2.mjs",
+    "selftest:ppt-requirements-parity": "node selftest-ppt-requirements-parity.mjs",
+    "selftest:ppt-m3": "node selftest-ppt-m3.mjs",
+    "selftest:ppt-m4": "node selftest-ppt-m4.mjs",
+    "selftest:ppt-m5": "node selftest-ppt-m5.mjs",
+    "selftest:ppt-semantic": "node selftest-ppt-semantic.mjs",
+    "selftest:ppt-content-depth": "node selftest-ppt-content-depth.mjs",
+    "selftest:ppt-prompt-contracts": "node selftest-ppt-prompt-contracts.mjs",
+    "selftest:ppt-evidence-quality": "node selftest-ppt-evidence-quality.mjs",
+    "selftest:ppt-real-fixture": "node selftest-ppt-real-fixture.mjs",
+    "selftest:ppt-template-fidelity": "node selftest-ppt-template-fidelity.mjs",
+    "selftest:ppt-template-scheduler": "node selftest-ppt-template-scheduler.mjs",
+    "selftest:ppt-long-storage": "node selftest-ppt-long-storage.mjs",
+    "selftest:ppt-recovery-sync": "node selftest-ppt-recovery-sync.mjs",
+    "selftest:ppt-long-limits": "node selftest-ppt-long-limits.mjs",
+    "selftest:ppt-report-qa": "node selftest-ppt-report-qa.mjs",
+    "selftest:ppt-structured": "node selftest-ppt-structured.mjs",
+    "benchmark:ppt-render": "node benchmark-ppt-render.mjs",
+    "selftest:ppt-mutation-runtime": "node selftest-ppt-mutation-runtime.mjs",
+    "selftest:ppt-edit-intent": "node selftest-ppt-edit-intent.mjs",
+    "selftest:ppt-offline-contracts": "node selftest-ppt-offline-contracts.mjs",
+    "benchmark:ppt-offline": "node scripts/ppt-balance/ppt-offline-eval.mjs"
+  },
+  "dependencies": {
+    "@tesseract.js-data/chi_sim": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "katex": "0.19.0",
+    "markdown-it": "14.1.1",
+    "tesseract.js": "7.0.0",
+    "ws": "^8.19.0"
+  }
+}

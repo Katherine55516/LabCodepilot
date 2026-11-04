@@ -1,0 +1,442 @@
+/**
+ * Unit tests for the deterministic execution-result reduction (src/lib/test/reduce.ts).
+ *
+ * Run with: npx tsx --test src/__tests__/unit/test-reduce.test.ts
+ *
+ * Locks the non-LLM aggregation/safety logic: harvest @@RESULT lines, four-state
+ * counts, ENV_HINT fail→blocked reclass, 401 circuit-breaker, passStr/status.
+ */
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { harvestResults, reduceResults, reduceFromText, sanitizeApi } from "../../lib/test/reduce";
+
+const OPTS = { module: "订单", env: "local", time: "2026-06-22T10:00:00.000Z" };
+
+describe("harvestResults", () => {
+  it("extracts @@RESULT lines, ignoring prose and malformed lines", () => {
+    const text = [
+      "▶ 用例 1/2：登录",
+      '@@RESULT {"id":"TC-001","status":"pass","actual":"ok","evidence":["TC-001.png"]}',
+      "一些普通输出",
+      "@@RESULT {不是合法json}",
+      '@@RESULT {"id":"TC-002","status":"fail","error":"x"}',
+    ].join("\n");
+    const r = harvestResults(text);
+    assert.equal(r.length, 2);
+    assert.equal(r[0].id, "TC-001");
+    assert.equal(r[1].status, "fail");
+  });
+
+  it("tolerates @@RESULT not at line start", () => {
+    const r = harvestResults('prefix @@RESULT {"id":"TC-9","status":"pass"}');
+    assert.equal(r.length, 1);
+    assert.equal(r[0].id, "TC-9");
+  });
+});
+
+describe("reduceResults — counts + normalization", () => {
+  it("counts four states and normalizes aliases", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "passed" }, // alias → pass
+        { id: "B", status: "fail", error: "后端未校验" },
+        { id: "C", status: "skipped" }, // alias → partial
+        { id: "D", status: "blocked", error: "缺 admin" },
+      ],
+      OPTS,
+    );
+    assert.deepEqual(run.counts, { total: 4, pass: 1, fail: 1, partial: 1, blocked: 1 });
+    assert.equal(run.passStr, "1/4");
+    assert.equal(run.status, "failed"); // any real fail ⇒ failed
+    assert.equal(run.circuitBroken, false);
+  });
+
+  it("unknown status falls back to fail", () => {
+    const run = reduceResults([{ id: "A", status: "weird" }], OPTS);
+    assert.equal(run.counts.fail, 1);
+  });
+
+  it("all-pass ⇒ status done", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }, { id: "B", status: "pass" }], OPTS);
+    assert.equal(run.status, "done");
+    assert.equal(run.passStr, "2/2");
+  });
+
+  it("only blocked (nothing ran) ⇒ status blocked", () => {
+    const run = reduceResults([{ id: "A", status: "blocked", error: "环境不可达" }], OPTS);
+    assert.equal(run.status, "blocked");
+  });
+});
+
+describe("reduceResults — ENV_HINT reclass", () => {
+  it("reclasses a fail with a connection error to blocked (not an app bug)", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "fail", error: "net::ERR_CONNECTION_REFUSED at /orders" },
+        { id: "B", status: "fail", error: "断言失败：预期库存不足提示未出现" },
+      ],
+      OPTS,
+    );
+    // A → blocked (env), B stays fail
+    assert.equal(run.counts.blocked, 1);
+    assert.equal(run.counts.fail, 1);
+    const a = run.tests.find((t) => t.id === "A");
+    assert.equal(a?.status, "blocked");
+  });
+
+  it("matches Chinese connection wording (拒绝连接 / 无法访问)", () => {
+    const run = reduceResults([{ id: "A", status: "fail", error: "目标地址拒绝连接" }], OPTS);
+    assert.equal(run.tests[0].status, "blocked");
+  });
+});
+
+describe("reduceResults — 401 circuit-breaker", () => {
+  it("trips when >50% of fails carry a 401", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "fail", error: "请求返回 401 未授权" },
+        { id: "B", status: "fail", error: "接口 401" },
+        { id: "C", status: "fail", error: "真实断言失败" },
+      ],
+      OPTS,
+    );
+    // 2 of 3 fails are 401 → circuit broken
+    assert.equal(run.circuitBroken, true);
+  });
+
+  it("does not trip when 401 is a minority of fails", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "fail", error: "401" },
+        { id: "B", status: "fail", error: "断言失败 X" },
+        { id: "C", status: "fail", error: "断言失败 Y" },
+      ],
+      OPTS,
+    );
+    assert.equal(run.circuitBroken, false);
+  });
+
+  it("does not trip with zero fails", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], OPTS);
+    assert.equal(run.circuitBroken, false);
+  });
+});
+
+describe("reduceFromText", () => {
+  it("harvests + reduces end to end", () => {
+    const text = [
+      '@@RESULT {"id":"TC-001","status":"pass","actual":"已跳转 /home","evidence":["TC-001.png"]}',
+      '@@RESULT {"id":"TC-002","status":"fail","actual":"无提示","error":"后端未校验库存"}',
+      '@@RESULT {"id":"TC-003","status":"blocked","error":"缺 admin 账号"}',
+    ].join("\n");
+    const run = reduceFromText(text, OPTS);
+    assert.deepEqual(run.counts, { total: 3, pass: 1, fail: 1, partial: 0, blocked: 1 });
+    assert.equal(run.passStr, "1/3");
+    assert.equal(run.module, "订单");
+    assert.equal(run.tests[0].evidence[0], "TC-001.png");
+  });
+});
+
+describe("reduceResults — dual-rate (oracle 双轴)", () => {
+  it("no verification map ⇒ degrades to single-rate (funcCounts === counts)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "fail", error: "x" }],
+      OPTS,
+    );
+    assert.deepEqual(run.funcCounts, run.counts);
+    assert.equal(run.funcPassStr, run.passStr);
+    assert.equal(run.regressionTotal, 0);
+  });
+
+  it("excludes 回归基线 cases from the functional pass rate", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "pass" }, // 功能验证 pass
+        { id: "B", status: "fail", error: "真实缺陷" }, // 功能验证 fail
+        { id: "C", status: "pass" }, // 回归基线 pass — must NOT inflate functional rate
+        { id: "D", status: "pass" }, // 回归基线 pass
+      ],
+      { ...OPTS, verificationById: { A: "功能验证", B: "功能验证", C: "回归基线", D: "回归基线" } },
+    );
+    assert.equal(run.passStr, "3/4"); // execution rate counts everything
+    assert.deepEqual(run.funcCounts, { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.equal(run.funcPassStr, "1/2"); // functional rate excludes the 2 regression passes
+    assert.equal(run.regressionTotal, 2);
+  });
+
+  it("all 回归基线 ⇒ funcPassStr is N/A (never report 100% functional)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, verificationById: { A: "回归基线", B: "回归基线" } },
+    );
+    assert.equal(run.passStr, "2/2"); // execution rate is still 100%
+    assert.equal(run.funcPassStr, "N/A"); // but functional rate is N/A — only locks status quo
+    assert.equal(run.funcCounts.total, 0);
+    assert.equal(run.regressionTotal, 2);
+  });
+
+  it("a test id absent from the map defaults to 功能验证 (lineage-safe)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, verificationById: { A: "回归基线" } }, // B not in the map
+    );
+    assert.equal(run.regressionTotal, 1);
+    assert.deepEqual(run.funcCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.equal(run.funcPassStr, "1/1");
+  });
+});
+
+describe("api passthrough + sanitizeApi (缺陷报告接口信息地基)", () => {
+  it("threads a well-formed api object from a result into the reduced test", () => {
+    const run = reduceResults(
+      [
+        {
+          id: "TC-007",
+          status: "fail",
+          error: "金额为 0",
+          api: { method: "POST", url: "/api/mealAllowance/calc", status: 200, requestBody: "{p:1}", responseBody: '{"amount":0}' },
+        },
+      ],
+      OPTS,
+    );
+    assert.equal(run.tests[0].api?.method, "POST");
+    assert.equal(run.tests[0].api?.url, "/api/mealAllowance/calc");
+    assert.equal(run.tests[0].api?.status, 200);
+    assert.equal(run.tests[0].api?.responseBody, '{"amount":0}');
+  });
+
+  it("omits api on cases without it (pass cases stay clean)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], OPTS);
+    assert.equal(run.tests[0].api, undefined);
+  });
+
+  it("sanitizeApi drops non-objects and empty captures", () => {
+    assert.equal(sanitizeApi(undefined), undefined);
+    assert.equal(sanitizeApi("nope"), undefined);
+    assert.equal(sanitizeApi({}), undefined);
+    assert.equal(sanitizeApi({ method: "", url: "" }), undefined);
+  });
+
+  it("sanitizeApi truncates oversized bodies (~4000 chars + ellipsis)", () => {
+    const big = "x".repeat(9000);
+    const api = sanitizeApi({ url: "/api/x", requestBody: big, responseBody: big });
+    assert.ok(api);
+    assert.ok((api!.requestBody?.length ?? 0) <= 4001);
+    assert.ok(api!.requestBody!.endsWith("…"));
+    assert.ok(api!.responseBody!.endsWith("…"));
+  });
+
+  it("reduceFromText carries api end-to-end", () => {
+    const text = '@@RESULT {"id":"TC-9","status":"fail","error":"e","api":{"method":"GET","url":"/x","status":500}}';
+    const run = reduceFromText(text, OPTS);
+    assert.equal(run.tests[0].api?.status, 500);
+    assert.equal(run.tests[0].api?.method, "GET");
+  });
+});
+
+describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以用例全集为准）", () => {
+  it("backfills caseIds missing from results as blocked (未执行)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "fail", error: "真实缺陷" }],
+      { ...OPTS, caseIds: ["A", "B", "C", "D"] },
+    );
+    // 报告用例数 = cases 全集 4，而非仅执行出结果的 2（问题②的核心修复）。
+    assert.deepEqual(run.counts, { total: 4, pass: 1, fail: 1, partial: 0, blocked: 2 });
+    assert.equal(run.tests.length, 4);
+    const c = run.tests.find((t) => t.id === "C");
+    assert.equal(c?.status, "blocked");
+    assert.ok(c?.error.includes("未执行"));
+  });
+
+  it("no caseIds ⇒ behavior unchanged (向后兼容)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], OPTS);
+    assert.equal(run.counts.total, 1);
+    assert.equal(run.tests.length, 1);
+  });
+
+  it("does not duplicate when every caseId already has a result", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"] },
+    );
+    assert.equal(run.tests.length, 2);
+    assert.equal(run.counts.total, 2);
+  });
+
+  it("backfilled 未执行 cases count toward funcCounts (不虚报功能通过率)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"], verificationById: { A: "功能验证", B: "功能验证" } },
+    );
+    // B 未执行 → blocked，计入功能验证 total，通过率 1/2 不虚高。
+    assert.deepEqual(run.funcCounts, { total: 2, pass: 1, fail: 0, partial: 0, blocked: 1 });
+    assert.equal(run.funcPassStr, "1/2");
+  });
+
+  it("backfilled blocked does not trip the 401 circuit-breaker", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B", "C"] },
+    );
+    assert.equal(run.circuitBroken, false);
+  });
+
+  it("以 cases 为准：丢弃不在 caseIds 中的多余结果（设计 1 条用例不出 2 条报告）", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "GHOST", status: "fail", error: "AI 编造的额外用例" }],
+      { ...OPTS, caseIds: ["A"] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.counts.total, 1);
+    assert.equal(run.tests[0].id, "A");
+    assert.ok(!run.tests.some((t) => t.id === "GHOST"));
+  });
+
+  it("严格一一对应：缺失补全 + 多余丢弃同时生效，且按 caseIds 顺序", () => {
+    const run = reduceResults(
+      [{ id: "X-ghost", status: "fail" }, { id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"] },
+    );
+    assert.deepEqual(run.tests.map((t) => t.id), ["A", "B"]);
+    assert.equal(run.tests[1].status, "blocked"); // B 未执行
+    assert.ok(!run.tests.some((t) => t.id === "X-ghost"));
+  });
+
+  it("同 id 多条结果取第一条（AI 对一条用例重复产出）", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass", actual: "第一次" }, { id: "A", status: "fail", actual: "第二次" }],
+      { ...OPTS, caseIds: ["A"] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].actual, "第一次");
+  });
+});
+
+// 真机事故（forum-xc-sit / 20260722测试用例）：用例 id 带弯引号 ‘码’，模型判定 pass 且
+// @@RESULT 合规，只是把引号抄成了 ASCII '码' → 精确比对认不出 → pass 被丢弃、用例补成
+// blocked「未执行」→ 报告写「回归集未全过（0/1），存在阻塞级失败，不可发版」。
+describe("reduceResults — id 印刷体标点漂移仍认回用例（真机事故回归）", () => {
+  const ID = "1108941+菜单栏-更多-‘码’上合规的子标题更改";
+  const EMITTED = "1108941+菜单栏-更多-'码'上合规的子标题更改";
+
+  it("弯引号 id 收到直引号结果 ⇒ 记 pass，而不是 blocked「未执行」", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass", actual: "子标题已改为「以码为基，以规为界」" }],
+      { ...OPTS, caseIds: [ID], suiteIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "pass");
+    assert.equal(run.tests[0].id, ID, "落盘 id 必须是 cases.json 的权威写法");
+    assert.ok(!run.tests[0].notExecuted);
+    assert.equal(run.tests[0].actual, "子标题已改为「以码为基，以规为界」");
+    assert.equal(run.status, "done");
+    assert.equal(run.passStr, "1/1");
+    assert.equal(run.suitePassStr, "1/1", "回归集应判全过（不再误报不可发版）");
+  });
+
+  it("双轴/回归集口径按权威 id 关联（回贴后的 id 要能被 verificationById 认到）", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass" }],
+      { ...OPTS, caseIds: [ID], verificationById: { [ID]: "回归基线" } },
+    );
+    assert.equal(run.regressionTotal, 1);
+    assert.equal(run.funcPassStr, "N/A");
+  });
+
+  it("歧义时不猜：两条用例规范化后撞键 ⇒ 仍按未执行兜底，不把结果记到任一条头上", () => {
+    const run = reduceResults(
+      [{ id: "TC’x‘", status: "pass" }],
+      { ...OPTS, caseIds: ["TC‘x’", "TC'x'"] },
+    );
+    assert.deepEqual(run.tests.map((t) => t.status), ["blocked", "blocked"]);
+    assert.ok(run.tests.every((t) => t.notExecuted));
+  });
+
+  it("编造的用例仍被丢弃（回贴不得成为塞进多余结果的后门）", () => {
+    const run = reduceResults(
+      [{ id: "完全不相干的用例", status: "pass" }],
+      { ...OPTS, caseIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "blocked");
+    assert.ok(run.tests[0].notExecuted);
+  });
+});
+
+describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试」,发版红线）", () => {
+  it("按 suiteIds 独立计数,与全量/功能验证口径并存", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "pass" },
+        { id: "B", status: "fail", error: "按钮点不动" },
+        { id: "C", status: "pass" },
+      ],
+      { ...OPTS, caseIds: ["A", "B", "C"], suiteIds: ["A", "B"] },
+    );
+    assert.deepEqual(run.suiteCounts, { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.equal(run.suitePassStr, "1/2"); // 回归集未全过 → 发版红线
+    assert.equal(run.counts.total, 3); // 全量口径不受影响
+  });
+
+  it("回归集与回归基线（verification 口径）正交:同一条用例两套口径各自独立计数", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      {
+        ...OPTS,
+        caseIds: ["A", "B"],
+        // A:功能验证 + 回归集;B:回归基线 + 非回归集 —— 两轴交叉。
+        verificationById: { A: "功能验证", B: "回归基线" },
+        suiteIds: ["A"],
+      },
+    );
+    assert.equal(run.regressionTotal, 1); // 回归基线口径:B
+    assert.equal(run.funcCounts.total, 1); // 功能验证口径:A
+    assert.deepEqual(run.suiteCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 }); // 回归集口径:A
+    assert.equal(run.suitePassStr, "1/1");
+  });
+
+  it("回归集用例未执行 → caseIds 补全的 blocked 计入回归集(漏跑不算过,不虚报发版可行)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], { ...OPTS, caseIds: ["A", "B"], suiteIds: ["B"] });
+    assert.deepEqual(run.suiteCounts, { total: 1, pass: 0, fail: 0, partial: 0, blocked: 1 });
+    assert.equal(run.suitePassStr, "0/1");
+  });
+
+  it("无 suiteIds（旧调用/无标签用例）→ suite 字段缺省,run.json 序列化后不含该键(向后兼容)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], { ...OPTS, caseIds: ["A"] });
+    assert.equal(run.suiteCounts, undefined);
+    assert.equal(run.suitePassStr, undefined);
+    assert.ok(!JSON.stringify(run).includes("suiteCounts"));
+  });
+});
+
+describe("reduceResults — taskCounts 按来源任务小计（v2 回归轮次分组）", () => {
+  it("传 taskOf → 按任务分组四态;缺映射的 runId 归「未知来源」;不传 → 字段缺省", () => {
+    const raw = [
+      { id: "TC-001", status: "pass" },
+      { id: "设备预约::TC-001", status: "fail" },
+      { id: "TC-002", status: "pass" },
+      { id: "野生ID", status: "pass" },
+    ];
+    const withTask = reduceResults(raw, {
+      module: "回归用例库", env: "local", time: "t",
+      taskOf: { "TC-001": "登录鉴权", "设备预约::TC-001": "设备预约", "TC-002": "设备预约" },
+    });
+    assert.ok(withTask.taskCounts);
+    assert.deepEqual(withTask.taskCounts!["登录鉴权"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["设备预约"], { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["未知来源"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    // 不传 taskOf → 无 taskCounts(普通任务/旧消费方零影响)
+    const without = reduceResults(raw, { module: "m", env: "local", time: "t" });
+    assert.equal(without.taskCounts, undefined);
+  });
+
+  it("caseIds 对齐补全的「未执行」blocked 同样计入所属任务小计", () => {
+    const out = reduceResults([{ id: "TC-001", status: "pass" }], {
+      module: "回归用例库", env: "local", time: "t",
+      caseIds: ["TC-001", "TC-002"],
+      taskOf: { "TC-001": "登录鉴权", "TC-002": "登录鉴权" },
+    });
+    assert.deepEqual(out.taskCounts!["登录鉴权"], { total: 2, pass: 1, fail: 0, partial: 0, blocked: 1 });
+  });
+});

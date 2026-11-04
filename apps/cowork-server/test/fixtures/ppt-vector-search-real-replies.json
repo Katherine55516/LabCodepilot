@@ -1,0 +1,302 @@
+{
+ "version": 1,
+ "provenance": "Actual replies from real outline-first runs on the vector-search review (2026-10-22, qwen3.8-max via the desktop bridge). Only the parsed reply is kept; prompts are identified by their sha256. Source: the run input, verbatim. The stale_claim_mirror entry is the stored whole-deck review of verification run 3 (claim confirmation overturned a verdict whose mirror stayed in unsupported).",
+ "source": "# 向量检索服务性能优化复盘（2026 年第三季度）\n\n## 背景\n\n客服知识库的向量检索服务在第二季度末接入了三个新业务线，日均查询量从 120 万次增长到 310 万次。服务部署在 6 台 GPU 推理节点和 4 台检索节点上，索引规模约 4,800 万条向量（768 维）。\n\n增长之后出现了三个问题：高峰期 P99 延迟从 180 ms 上升到 640 ms；每月 GPU 成本从 9.6 万元增加到 21.4 万元；召回质量在新业务线上明显下降，人工抽检的 Top-5 命中率只有 71%。\n\n## 根因分析\n\n1. **索引结构不匹配**：仍使用单一 HNSW 索引，M=48、efSearch=256。新业务线的向量分布更分散，图的平均跳数增加了约 2.3 倍。\n2. **嵌入模型重复计算**：约 38% 的查询是重复或近似重复的问题，但没有缓存，每次都重新计算嵌入。\n3. **召回与重排耦合**：重排模型对 Top-200 候选全部打分，占用了 62% 的 GPU 时间。\n4. **新业务数据未清洗**：新业务线的文档中有 17% 是重复段落或模板化页脚，稀释了相关结果。\n\n## 优化方案\n\n### 第一步：分层索引\n\n按业务线拆分为 4 个分片，每个分片使用 IVF-PQ 粗排（nlist=4096，nprobe=32）加 HNSW 精排。查询先路由到所属业务线的分片，跨业务查询才做全分片检索。\n\n### 第二步：嵌入缓存\n\n对规范化后的查询文本做哈希，结果写入 Redis，过期时间 24 小时。近似重复的查询通过 SimHash 距离不超过 3 判定为命中。\n\n### 第三步：两阶段重排\n\n先用轻量交叉编码器把 Top-200 缩减到 Top-40，再由大模型重排 Top-40。轻量模型在 CPU 上运行。\n\n### 第四步：数据清洗\n\n上线文档去重和页脚剥离规则，并要求新业务线在接入前通过数据质量检查（重复率低于 5%）。\n\n## 结果\n\n| 指标 | 优化前 | 优化后 | 变化 |\n| --- | --- | --- | --- |\n| P99 延迟 | 640 ms | 210 ms | -67% |\n| P50 延迟 | 95 ms | 48 ms | -49% |\n| 每月 GPU 成本 | 21.4 万元 | 11.2 万元 | -48% |\n| Top-5 命中率（新业务线） | 71% | 88% | +17 个百分点 |\n| 缓存命中率 | — | 41% | 新增 |\n\n上线分三批进行，每批之间观察 7 天，没有发生回滚。\n\n## 风险与遗留问题\n\n- 跨业务查询仍然走全分片检索，占总查询的 9%，P99 约 420 ms。\n- 缓存在知识库更新后需要按业务线失效，目前依赖人工触发。\n- 轻量重排模型在长问题（超过 120 字）上会漏掉部分相关候选。\n\n## 下一步计划\n\n1. 第四季度为跨业务查询建立联合路由模型，目标 P99 低于 250 ms。\n2. 知识库发布流程中加入缓存自动失效。\n3. 为长问题增加查询改写，再评估轻量重排的漏召回率。\n4. 每月复核一次成本与命中率，结果同步给三个业务线负责人。\n",
+ "replies": [
+  {
+   "run": "after4",
+   "stage": "outline:editorial-coverage-audit:4:d3917971b0cc9a77",
+   "promptSha256": "bdf13a1c5447cd90066190ebf938d6ee2b18b7dc80386c9dcc3b214b5abb4291",
+   "slip": "duplicate_ids",
+   "result": {
+    "sufficient": false,
+    "missingSourceUnitIds": [
+     "b_0020",
+     "b_0020"
+    ],
+    "reason": "Visible b_0020 nodes list the three residual risks but omit the original qualifying details: cross-business queries account for 9% of total traffic, and long-question misses occur when queries exceed 120 characters. These numerical conditions are necessary to qualify the visible claims. Additionally, source b_0022 (下一步计划) is entirely absent from the visible body despite having its own major heading ('遗留风险与下一步计划') and page title; its four Q4 action items (joint routing model targeting P99<250ms, auto cache invalidation in publish flow, query rewriting for long questions, monthly cost/hit-rate review synced to three business-line owners) constitute a core topic that must be substantively explained."
+   }
+  },
+  {
+   "run": "after5",
+   "stage": "outline:editorial-coverage-audit:5:80d082b22135e80c",
+   "promptSha256": "16689f487974643a8e855a3af0e1cc02858c1e0f99d3cdae3031b35bc91aa0a0",
+   "slip": "duplicate_ids",
+   "result": {
+    "sufficient": false,
+    "missingSourceUnitIds": [
+     "b_0020",
+     "b_0020"
+    ],
+    "reason": "The visible page titled '遗留风险与下一步计划' includes b_0020 and b_0022, but the actual visible body content only shows b_0020's risk nodes (cross-business 9%/420ms, manual cache invalidation, long-query >120 char recall miss). The entire next-steps plan from b_0022 is missing: Q4 joint routing model with P99<250ms target, automatic cache invalidation in KB publish flow, query rewriting for long questions to re-evaluate lightweight reranker recall, and monthly cost/hit-rate review synced to three business line leads. These are substantive action items qualifying the risks, not optional historical detail."
+   }
+  },
+  {
+   "run": "after6",
+   "stage": "outline:editorial-coverage-audit:5:d5f41b9efd78344a",
+   "promptSha256": "2bc296905184d06486c435a81a885a2c4f7c40057a71df8bad92f4d6c487c9d3",
+   "slip": "duplicate_ids",
+   "result": {
+    "sufficient": false,
+    "missingSourceUnitIds": [
+     "b_0020",
+     "b_0020"
+    ],
+    "reason": "Source unit b_0020 is listed in reviewableSourceUnitIds and its page title ('遗留风险与下一步计划') is visible, but the actual substantive risk details (cross-business queries still using full-shard search at 9% volume with P99 ~420ms; cache invalidation after KB updates requiring manual trigger per business line; lightweight reranker missing relevant candidates for long questions >120 chars) are absent from the visible body. The visible entry for b_0020 contains only graph node/edge metadata with empty bodies, which does not constitute substantive explanation. These specific residual risks and their numerical qualifiers must be restored."
+   }
+  },
+  {
+   "run": "after6",
+   "stage": "outline:editorial-coverage-audit:4:ceb2532f4983f32a",
+   "promptSha256": "b1f33217cc732456d1c67da684c8c5058cd9754b9c398aa6af39f8608f3a93ec",
+   "slip": "duplicate_ids",
+   "result": {
+    "sufficient": false,
+    "missingSourceUnitIds": [
+     "b_0020",
+     "b_0020"
+    ],
+    "reason": "Source b_0020 is in reviewableSourceUnitIds and its visible representation (a node graph) contains empty body fields, meaning the substantive risk details are not actually explained on the page. The three specific risks with their necessary qualifiers—cross-business queries still using full-shard search (9% of traffic, P99 ~420ms), cache invalidation after knowledge-base updates relying on manual triggers per business line, and the lightweight reranker missing relevant candidates for long queries (>120 characters)—are not faithfully stated in any visible body text. Although the page title references '遗留风险与下一步计划' and source b_0022 (next steps) is visible, titles alone cannot replace the substantive explanation of the risks themselves, and b_0022's plan items do not convey the current-state numerical conditions or mechanisms of the risks. Minimum restoration: add the three risk statements from b_0020 with their key numbers/conditions to the visible body."
+   }
+  },
+  {
+   "run": "after3",
+   "stage": "outline:materialize:page_5bfa368f5237e4cf5d9d:2e4286dd949205d2",
+   "promptSha256": "9cb4e9677cbfe0a8577ac73ee2871a8b8b898eb2fdc3b907d8e11dfd01e6a39b",
+   "slip": "number_after_cjk",
+   "result": {
+    "selection": [
+     {
+      "sourceUnitId": "b_0003",
+      "destination": "summary",
+      "reason": "Summarizes the query volume growth mechanism and deployment scale that caused subsequent performance issues.",
+      "primaryPageIndex": 1,
+      "summaryText": "客服知识库向量检索服务在第二季度末接入三个新业务线后，日均查询量从120万次增至310万次。服务部署于6台GPU推理节点与4台检索节点，索引规模约4800万条768维向量。"
+     },
+     {
+      "sourceUnitId": "b_0004",
+      "destination": "summary",
+      "reason": "Summarizes the three degradation symptoms in latency, cost, and recall quality resulting from the traffic growth.",
+      "primaryPageIndex": 1,
+      "summaryText": "查询量增长后出现三项退化：高峰期P99延迟由180ms升至640ms；月度GPU成本从9.6万元增至21.4万元；新业务线召回质量下降，人工抽检Top-5命中率仅71%。"
+     }
+    ]
+   }
+  },
+  {
+   "run": "after3",
+   "stage": "outline:materialize:page_a078c635f983343f1348:cc841ad8d3de6d96",
+   "promptSha256": "14b68a7580de61fdb873cc46f12c11ff35c69da6c55bef4483577f1d62bc8133",
+   "slip": "number_after_cjk",
+   "result": {
+    "selection": [
+     {
+      "sourceUnitId": "b_0003",
+      "destination": "summary",
+      "reason": "Summarizes the mechanism block establishing the scale baseline after new business line onboarding, preserving all numbers and deployment details in Chinese.",
+      "primaryPageIndex": 1,
+      "summaryText": "客服知识库向量检索服务在第二季度末接入三个新业务线，日均查询量由120万次增至310万次。服务部署于6台GPU推理节点和4台检索节点，索引规模约4800万条768维向量。"
+     },
+     {
+      "sourceUnitId": "b_0004",
+      "destination": "summary",
+      "reason": "Summarizes the warning block detailing the three core performance degradations triggered by the scale growth, keeping all metrics verbatim in Chinese.",
+      "primaryPageIndex": 1,
+      "summaryText": "增长后出现三项问题：高峰期P99延迟从180ms升至640ms；每月GPU成本从9.6万元增至21.4万元；新业务线召回质量明显下降，人工抽检Top-5命中率仅71%。"
+     }
+    ]
+   }
+  },
+  {
+   "run": "final-gen-3",
+   "stage": "review:deck:repair (after claim confirmation)",
+   "promptSha256": null,
+   "slip": "stale_claim_mirror",
+   "result": {
+    "evaluation": "evaluated",
+    "missing": [],
+    "repeated": [],
+    "conflicts": [
+     {
+      "slideIds": [
+       "page_b99e0b322cb55d8e21ec"
+      ],
+      "detail": "node_27ca713f49849e04654efbad 可见文本以“该机制按业务线拆分为 4 个分片”开头，但来源 b_0009 原文为“按业务线拆分为 4 个分片”，并无“该机制”三字。该指代词暗示前文存在未展示的定义对象，在当前页面无支撑且改变了原文的起始语义，构成无依据的新增事实前提。",
+      "suggestedFix": "删除 node_27ca713f49849e04654efbad 开头的“该机制”，恢复为来源原文“按业务线拆分为 4 个分片”。"
+     }
+    ],
+    "unsupported": [
+     {
+      "code": "claim_entailment_contradicted",
+      "severity": "error",
+      "slideIds": [
+       "page_b99e0b322cb55d8e21ec"
+      ],
+      "nodeId": "node_27ca713f49849e04654efbad",
+      "detail": "node_27ca713f49849e04654efbad 在句首新增了“该机制”一词，而来源 b_0009 原文直接以“按业务线拆分”起句。该新增指代词引入了当前页面不可见的前置定义假设，属于 unsupported_fact。",
+      "reason": "unsupported_fact"
+     }
+    ],
+    "claimAudit": {
+     "version": 2,
+     "registryHash": "226aed693431681f8a7151205d7aff62e123046df077b96b096a4b78ce0c2d15",
+     "status": "complete",
+     "checks": [
+      {
+       "claimId": "claim-b3a2babd7512fd5cc3ead518",
+       "slideId": "page_f8e67d5824d20309101c",
+       "nodeId": "node_7db35d97b204faecbeb1cf1b",
+       "textHash": "e5167d7aa561b242d26f6cccb5411ba792fce2e6cd1d308c4c5a34f9050353e6",
+       "status": "entailed",
+       "reason": "node_7db35d97b204faecbeb1cf1b 完整承载了接入三个新业务线、查询量由120万增至310万、6台GPU与4台检索节点、约4800万条768维向量等全部量化条件，与来源 b_0003 语义一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0003",
+         "quoteId": "source-quote-9b99dd1448d3f4429738545f",
+         "excerpt": "客服知识库的向量检索服务在第二季度末接入了三个新业务线，日均查询量从 120 万次增长到 310 万次。服务部署在 6 台 GPU 推理节点和 4 台检索节点上，索引规模约 4,800 万条向量（768 维）。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-0e807972a4de3f973358ca72",
+       "slideId": "page_f8e67d5824d20309101c",
+       "nodeId": "node_29266c55137c92a5174511ff",
+       "textHash": "868c8cb8174816b6aa6977fbf1fdefd11fd82137ff133ba88959a35b6684a35d",
+       "status": "entailed",
+       "reason": "node_29266c55137c92a5174511ff 逐字保留了 P99 延迟从 180ms 升至 640ms、GPU 成本从 9.6 万元增至 21.4 万元、Top-5 命中率仅 71% 三项问题及其量词条件，与来源 b_0004 完全对应。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0004",
+         "quoteId": "source-quote-3c121ff0c83444c5843e2462",
+         "excerpt": "增长之后出现了三个问题：高峰期 P99 延迟从 180 ms 上升到 640 ms；每月 GPU 成本从 9.6 万元增加到 21.4 万元；召回质量在新业务线上明显下降，人工抽检的 Top-5 命中率只有 71%。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-ee22b878542573c7c38593eb",
+       "slideId": "page_b99e0b322cb55d8e21ec",
+       "nodeId": "node_27ca713f49849e04654efbad",
+       "textHash": "0865ffbad225b9c58b573600a647072b3f8ec43e607e7280acada0365a0eb534",
+       "status": "entailed",
+       "reason": "The claim text matches source b_0009 exactly, with the addition of the anaphoric phrase '该机制' (this mechanism) at the beginning. This phrase functions as a natural discourse referent to the adjacent visible label node '优化方案链路' and does not introduce any new unsupported facts, alter quantifiers, change causal attribution, or modify the technical parameters. All substantive propositions—splitting into 4 shards by business line, using IVF-PQ coarse ranking (nlist=4096, nprobe=32) plus HNSW fine ranking per shard, routing queries to the respective business line shard first, and performing full-shard retrieval only for cross-business queries—are fully supported by source b_0009.",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0009",
+         "quoteId": "source-quote-f4f707718cb00721b3a0ed1e",
+         "excerpt": "按业务线拆分为 4 个分片，每个分片使用 IVF-PQ 粗排（nlist=4096，nprobe=32）加 HNSW 精排。查询先路由到所属业务线的分片，跨业务查询才做全分片检索。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-34684d8f6575bc8eeec2e34f",
+       "slideId": "page_b99e0b322cb55d8e21ec",
+       "nodeId": "node_edae2f058874e0f478d92d57",
+       "textHash": "68c0b00344551884e282f74e54acb0c9bccd7af43b3261c49bbcfeafbb7f0583",
+       "status": "entailed",
+       "reason": "node_edae2f058874e0f478d92d57 完整保留了规范化哈希、Redis、过期时间 24 小时、SimHash 距离不超过 3 等所有阈值和条件，与来源 b_0011 一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0011",
+         "quoteId": "source-quote-e501219d4d2e0bdde7bcbcd2",
+         "excerpt": "对规范化后的查询文本做哈希，结果写入 Redis，过期时间 24 小时。近似重复的查询通过 SimHash 距离不超过 3 判定为命中。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-16529fc2dcd57111e7ec88dc",
+       "slideId": "page_b99e0b322cb55d8e21ec",
+       "nodeId": "node_503b043d26923b8774be9bed",
+       "textHash": "9f673698b92f11f72d4df44b4d8b699e1d0134acd37ccf8d378d56578ce5f9ce",
+       "status": "entailed",
+       "reason": "node_503b043d26923b8774be9bed 准确呈现了轻量交叉编码器 Top-200 缩减至 Top-40、大模型重排 Top-40、轻量模型运行于 CPU 的全部流程步骤，与来源 b_0013 一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0013",
+         "quoteId": "source-quote-03b7870578146eb8a8608857",
+         "excerpt": "先用轻量交叉编码器把 Top-200 缩减到 Top-40，再由大模型重排 Top-40。轻量模型在 CPU 上运行。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-bb35299d85e5e70532b1677b",
+       "slideId": "page_b99e0b322cb55d8e21ec",
+       "nodeId": "node_8ae36bde5cd2a56670d218bc",
+       "textHash": "c133edc3e0717d070b2967eb8c09c7ea72e12f85634fa679c4d9afe4c3e4bc56",
+       "status": "entailed",
+       "reason": "node_8ae36bde5cd2a56670d218bc 完整保留了文档去重、页脚剥离规则以及重复率低于 5% 的准入条件，与来源 b_0015 一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0015",
+         "quoteId": "source-quote-a46439fbf8c6691123b7f112",
+         "excerpt": "上线文档去重和页脚剥离规则，并要求新业务线在接入前通过数据质量检查（重复率低于 5%）。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-e9d251bff11fa2009dbc1730",
+       "slideId": "page_b75ae51b58fd92445aca",
+       "nodeId": "node_3f38f0dd10b9a7ed397dc1a9",
+       "textHash": "20cf4d4787051871b0d2ab742466245bd6708d9b6554039d8a0440634781a921",
+       "status": "entailed",
+       "reason": "node_3f38f0dd10b9a7ed397dc1a9 逐字保留了上线分三批进行、每批之间观察 7 天、没有发生回滚的全部安全上线节奏条件，与来源 b_0018 一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0018",
+         "quoteId": "source-quote-29643fb45c43af853592bc95",
+         "excerpt": "上线分三批进行，每批之间观察 7 天，没有发生回滚。"
+        }
+       ]
+      },
+      {
+       "claimId": "claim-2e9518cd1efae90994cd4bc6",
+       "slideId": "page_27efd8e157fa32725a1b",
+       "nodeId": "node_52d448a17fc60d942da7c8e5",
+       "textHash": "be1027cf0986d6ebe9d73a4d628a19394991a32ceee8f9e4eb049951eb797df3",
+       "status": "entailed",
+       "reason": "node_52d448a17fc60d942da7c8e5 完整列出了跨业务查询占 9% 且 P99 约 420 ms、缓存失效依赖人工触发、长问题超过 120 字漏召回三项遗留风险及限制条件，与来源 b_0020 一致。",
+       "sourceEvidence": [
+        {
+         "sourceUnitId": "b_0020",
+         "quoteId": "source-quote-0817fd18ffa2decff5347b1d",
+         "excerpt": "- 跨业务查询仍然走全分片检索，占总查询的 9%，P99 约 420 ms。\n- 缓存在知识库更新后需要按业务线失效，目前依赖人工触发。\n- 轻量重排模型在长问题（超过 120 字）上会漏掉部分相关候选。"
+        }
+       ]
+      }
+     ]
+    },
+    "claimAuditConfirmation": {
+     "checks": [
+      {
+       "claimId": "claim-ee22b878542573c7c38593eb",
+       "status": "evaluated",
+       "before": {
+        "claimId": "claim-ee22b878542573c7c38593eb",
+        "slideId": "page_b99e0b322cb55d8e21ec",
+        "nodeId": "node_27ca713f49849e04654efbad",
+        "textHash": "0865ffbad225b9c58b573600a647072b3f8ec43e607e7280acada0365a0eb534",
+        "status": "contradicted",
+        "reason": "node_27ca713f49849e04654efbad 在句首新增了“该机制”一词，而来源 b_0009 原文直接以“按业务线拆分”起句。该新增指代词引入了当前页面不可见的前置定义假设，属于 unsupported_fact。",
+        "sourceEvidence": []
+       },
+       "after": {
+        "claimId": "claim-ee22b878542573c7c38593eb",
+        "slideId": "page_b99e0b322cb55d8e21ec",
+        "nodeId": "node_27ca713f49849e04654efbad",
+        "textHash": "0865ffbad225b9c58b573600a647072b3f8ec43e607e7280acada0365a0eb534",
+        "status": "entailed",
+        "reason": "The claim text matches source b_0009 exactly, with the addition of the anaphoric phrase '该机制' (this mechanism) at the beginning. This phrase functions as a natural discourse referent to the adjacent visible label node '优化方案链路' and does not introduce any new unsupported facts, alter quantifiers, change causal attribution, or modify the technical parameters. All substantive propositions—splitting into 4 shards by business line, using IVF-PQ coarse ranking (nlist=4096, nprobe=32) plus HNSW fine ranking per shard, routing queries to the respective business line shard first, and performing full-shard retrieval only for cross-business queries—are fully supported by source b_0009.",
+        "sourceEvidence": [
+         {
+          "sourceUnitId": "b_0009",
+          "quoteId": "source-quote-f4f707718cb00721b3a0ed1e",
+          "excerpt": "按业务线拆分为 4 个分片，每个分片使用 IVF-PQ 粗排（nlist=4096，nprobe=32）加 HNSW 精排。查询先路由到所属业务线的分片，跨业务查询才做全分片检索。"
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

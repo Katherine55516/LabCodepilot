@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import {inspectNativeOutlineTitles,inspectTemplateSlotDraft} from './lib/ppt-template-fidelity.mjs';
+import {outlineMetadataRepairPrompt,applyOutlineMetadataRepair} from './lib/ppt-outline-protocol.mjs';
+const p={source:{text:'# Deep Learning | 深度学习',semantic:{inventory:{items:[]}}},templateFidelity:{mode:'preserve',slides:[{nodes:[],slots:[{shapeId:3,role:'title',capacity:6,fontSizePt:51}]}]}};
+const raw={version:2,selection:[],slides:[{title:'Deep Learning | 深度学习',sourceUnitIds:[],focus:'Introduce deep learning.'}]};
+const conflicts=inspectNativeOutlineTitles(p,raw.slides);assert.equal(conflicts.length,1);assert.equal(conflicts[0].capacityVisualUnits,6);
+const diagnostic={details:{metadataConflicts:conflicts}};const prompt=outlineMetadataRepairPrompt(p,raw,diagnostic);assert.match(prompt,/capacityVisualUnits/);assert.match(prompt,/Deep Learning/);
+const fixed=applyOutlineMetadataRepair(raw,diagnostic,{version:2,updates:[{pageIndex:0,field:'title',text:'DL'}]});
+assert.equal(inspectNativeOutlineTitles(p,fixed.slides).length,0);assert.equal(inspectTemplateSlotDraft(p,0,fixed.slides[0]).filter(x=>x.code==='template_slot_overflow').length,0);
+assert.deepEqual(fixed.selection,raw.selection);assert.deepEqual(fixed.slides.map(s=>s.sourceUnitIds),raw.slides.map(s=>s.sourceUnitIds));assert.equal(fixed.slides.length,raw.slides.length);
+assert.equal(inspectNativeOutlineTitles({templateFidelity:{mode:'mapped'}},raw.slides).length,0);
+console.log('PASS: native title budgets are checked before confirmation with unchanged font, source selection and N; repaired title also passes writer slot budget.');
+const mixedRaw={version:2,slides:[{title:'Subject',focus:'Long intent',section:'Long section',sourceUnitIds:[]}]},mixedError={details:{metadataConflicts:[{pageIndex:0,field:'focus',maxLength:360,reason:'metadata_too_long'},{pageIndex:0,field:'section',maxLength:80,reason:'metadata_too_long'}]}};
+const {outlineResponseSchema}=await import('./lib/ppt-outline-protocol.mjs');const mixedSchema=outlineResponseSchema(outlineMetadataRepairPrompt(p,mixedRaw,mixedError));assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='section').properties.text.maxLength,80);assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='focus').properties.text.maxLength,180);
+assert.throws(()=>applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'x'.repeat(91)}]}),e=>e.details?.field==='section'&&e.details.maxLength===80&&e.details.actualLength===91);
+assert.deepEqual(applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'Section'}]}).slides[0].sourceUnitIds,mixedRaw.slides[0].sourceUnitIds);
+const repeatedRaw = {version:2,selection:[],slides:[{title:'Cover',sourceUnitIds:[]},{title:'Representation Learning',sourceUnitIds:['a'],focus:'Raw inputs'},{title:'Representation Learning',sourceUnitIds:['b'],focus:'Structural advantages'}]};
+const repeatedProject = {generationPolicy:{language:{mode:'source'}},templateFidelity:{mode:'preserve',slides:repeatedRaw.slides.map(()=>({nodes:[],slots:[]}))}};
+const repeatedErrors = inspectNativeOutlineTitles(repeatedProject,repeatedRaw.slides);
+assert.equal(repeatedErrors.length,1);assert.equal(repeatedErrors[0].pageIndex,2);assert.equal(repeatedErrors[0].duplicatesPageIndex,1);assert.deepEqual(repeatedErrors[0].requiredLanguages,['English'],'native title repair follows the single deck-language contract');
+const renamed = applyOutlineMetadataRepair(repeatedRaw,{details:{metadataConflicts:repeatedErrors}},{version:2,updates:[{pageIndex:2,field:'title',text:'DL Advantages'}]});
+assert.equal(inspectNativeOutlineTitles(repeatedProject,renamed.slides).length,0);assert.deepEqual(renamed.slides.map(s=>s.sourceUnitIds),repeatedRaw.slides.map(s=>s.sourceUnitIds));assert.equal(renamed.slides.length,repeatedRaw.slides.length);
+assert.equal(inspectNativeOutlineTitles(repeatedProject,repeatedRaw.slides.map((s,i)=>i===2?{...s,titleLocked:true}:s)).length,0,'user-locked repeated title stays unchanged');
+assert.equal(inspectNativeOutlineTitles({...repeatedProject,confirmedOutline:{hash:'frozen'}},repeatedRaw.slides).length,0,'a confirmed legacy plan resumes without retroactive metadata repair');
+assert.equal(inspectNativeOutlineTitles({...p,confirmedOutline:{hash:'frozen'}},raw.slides).length,1,'native capacity is still enforced on an already confirmed plan');
+{
+ const {repairOutlineMetadataBatch}=await import('./lib/ppt-outline-protocol.mjs');
+ const batchRaw={version:2,selection:[],slides:[{title:'Cover',sourceUnitIds:[]},{title:'Qlib Baselines',sourceUnitIds:['a']},{title:'DL Costs',sourceUnitIds:['b']}]};
+ const diagnostics={details:{metadataConflicts:[1,2].map(pageIndex=>({pageIndex,field:'title',maxLength:160,reason:'native_title_capacity',capacityVisualUnits:12,requiredLanguages:['English','Chinese']}))}};
+ let calls=0;
+ const delta=await repairOutlineMetadataBatch({generationPolicy:{language:{mode:'source'}}},batchRaw,diagnostics,async(prompt,attempt)=>{
+  calls++;
+  if(!attempt)return {version:2,updates:[{pageIndex:1,field:'title',text:'Qlib'},{pageIndex:2,field:'title',text:'DL Costs 代价'}]};
+  assert.match(prompt,/missingLanguages/);assert.match(prompt,/Chinese/);assert.equal(outlineResponseSchema(prompt).properties.updates.minItems,1,'only the rejected title is requested again');
+  return {version:2,updates:[{pageIndex:1,field:'title',text:'Qlib 基线'}]};
+ });
+ assert.equal(calls,2);assert.deepEqual(delta.updates.map(u=>u.text),['Qlib 基线','DL Costs 代价']);
+ assert.deepEqual(batchRaw.slides.map(s=>s.title),['Cover','Qlib Baselines','DL Costs'],'partial validation never mutates the raw candidate');
+ const applied=applyOutlineMetadataRepair(batchRaw,diagnostics,delta);assert.deepEqual(applied.slides.map(s=>s.sourceUnitIds),batchRaw.slides.map(s=>s.sourceUnitIds));
+ await assert.rejects(()=>repairOutlineMetadataBatch({},batchRaw,diagnostics,async()=>({version:2,updates:[{pageIndex:1,field:'title',text:'Qlib'},{pageIndex:2,field:'title',text:'DL Costs 代价'}]}),{maxAttempts:1}),error=>error.details.validatedUpdates.length===1&&error.details.rejectedFields[0].missingLanguages.includes('Chinese'));
+}

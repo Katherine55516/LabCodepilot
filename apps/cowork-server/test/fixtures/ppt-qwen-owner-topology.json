@@ -1,0 +1,1049 @@
+{
+  "origin": "actual qwen3.8-max outline 2026-10-20; source content omitted for topology regression",
+  "version": 2,
+  "slides": [
+    {
+      "title": "Tutorial 04 \u2014 The Factor Zoo: Theory and Taxonomy of Equity Factors",
+      "focus": "Overview of the theoretical spine bridging asset-pricing lineage, factor taxonomy, premia debates, and the statistical reality of the factor zoo.",
+      "role": "cover",
+      "sourceUnitIds": [
+        "b_0002",
+        "b_0003"
+      ]
+    },
+    {
+      "title": "Defining Factors and Anomalies",
+      "focus": "A factor explains cross-sectional expected return differences. Crucially, an anomaly is model-relative: as benchmark models expand, yesterday's anomaly becomes today's risk factor.",
+      "role": "definition",
+      "sourceUnitIds": [
+        "b_0009",
+        "b_0010",
+        "b_0012",
+        "b_0013",
+        "b_0017",
+        "b_0018"
+      ]
+    },
+    {
+      "title": "From CAPM Failures to APT Methodology",
+      "focus": "CAPM relies on homogeneous beliefs and an observable market portfolio, failing empirically (Roll's critique). APT drops these, proving no-arbitrage forces expected returns linear in factor loadings, legitimizing empirical factor hunts.",
+      "role": "mechanism",
+      "sourceUnitIds": [
+        "b_0031",
+        "b_0032",
+        "b_0043",
+        "b_0044",
+        "b_0050",
+        "b_0051",
+        "b_0064",
+        "b_0065",
+        "b_0069",
+        "b_0070",
+        "b_0074",
+        "b_0075",
+        "b_0076",
+        "b_0077",
+        "b_0078"
+      ]
+    },
+    {
+      "title": "Modern Multi-Factor Models: FF3, q-Factor, and Beyond",
+      "focus": "FF3 added size/value via 2x3 sorts. Carhart added monthly-rebalanced momentum. FF5 linked profitability/investment to DDM. q-factor derived I/A from production-side equilibrium, while q5 added forward-looking expected growth.",
+      "role": "comparison",
+      "sourceUnitIds": [
+        "b_0105",
+        "b_0106",
+        "b_0114",
+        "b_0130",
+        "b_0131",
+        "b_0136",
+        "b_0137",
+        "b_0139"
+      ]
+    },
+    {
+      "title": "Statistical Testing and the Source of Premia",
+      "focus": "Time-series regressions test portfolio alphas against factor returns. Premia stem from risk compensation, behavioral mispricing, or market frictions. Practitioners need failure predictions, not pure camp allegiance.",
+      "role": "evidence",
+      "sourceUnitIds": [
+        "b_0157",
+        "b_0158",
+        "b_0166",
+        "b_0167",
+        "b_0168"
+      ]
+    },
+    {
+      "title": "The Factor Zoo Problem and Validation Scorecards",
+      "focus": "Hundreds of anomalies cannot all be independent. The minimum standard exceeds a t-stat of 2, requiring economic rationale, point-in-time construction, robustness, and multiple-testing awareness. Scorecards prompt falsification criteria.",
+      "role": "problem",
+      "sourceUnitIds": [
+        "b_0175",
+        "b_0176",
+        "b_0180",
+        "b_0181",
+        "b_0184"
+      ]
+    },
+    {
+      "title": "Portfolio Construction Styles and Market Adaptation",
+      "focus": "Long-short academic factors and long-only index enhancements are not interchangeable; construction choices must be reported. Imported factors require local adaptation, such as A-share quality screens monitoring subsidies and related-party activity.",
+      "role": "mechanism",
+      "sourceUnitIds": [
+        "b_0187",
+        "b_0188",
+        "b_0189",
+        "b_0190",
+        "b_0195",
+        "b_0196",
+        "b_0199",
+        "b_0200",
+        "b_0201",
+        "b_0202"
+      ]
+    },
+    {
+      "title": "Mechanics of the Independent 2\u00d73 Sort",
+      "focus": "A Fama-French-style 2x3 sort splits the universe by market cap and independently by a characteristic into low/mid/high, forming six portfolios. Independent sorting ensures the resulting factor is not merely a size proxy.",
+      "role": "workflow",
+      "sourceUnitIds": [
+        "b_0205",
+        "b_0206",
+        "b_0208",
+        "b_0209"
+      ]
+    },
+    {
+      "title": "From Factors to Strategies: Workflow and Checklist",
+      "focus": "A factor is not a strategy without universe rules, execution assumptions, and capacity estimates. The workflow proceeds from economic rationale through red-teaming to small live allocation, ensuring the signal is not a renamed existing factor.",
+      "role": "workflow",
+      "sourceUnitIds": [
+        "b_0214",
+        "b_0215",
+        "b_0218",
+        "b_0219"
+      ]
+    },
+    {
+      "title": "Summary: Theory, Discipline, and Humility",
+      "focus": "The factor zoo provides vocabulary for systematic return patterns but warns that finite noisy data easily produces false discoveries. Good research combines theory, data discipline, conservative testing, cost realism, and regime humility.",
+      "role": "closing",
+      "sourceUnitIds": [
+        "b_0222",
+        "b_0223"
+      ]
+    }
+  ],
+  "selection": [
+    {
+      "sourceUnitId": "b_0002",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0003",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0009",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0010",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0011",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0012",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0013",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0014",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0015",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0016",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0017",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0018",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0020",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0021",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0022",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0023",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0024",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0025",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0026",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0027",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0031",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0032",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0033",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0034",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0035",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0037",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0038",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0039",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0040",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0041",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0042",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0043",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0044",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0045",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0046",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0047",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0048",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0049",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0050",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0051",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0052",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0053",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0054",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0055",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0056",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0057",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0058",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0059",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0060",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0061",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0062",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0063",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0064",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0065",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0066",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0067",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0069",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0070",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0071",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0072",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0073",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0074",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0075",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0076",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0077",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0078",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0080",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0081",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0082",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0083",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0084",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0085",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0086",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0087",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0088",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0089",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0090",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0091",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0092",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0093",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0094",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0095",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0096",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0097",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0098",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0099",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0100",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0102",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0103",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0104",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0105",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0106",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0107",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0108",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0110",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0111",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0112",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0113",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0114",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0115",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0116",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0117",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0118",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0119",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0120",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0121",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0123",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0124",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0125",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0126",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0127",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0128",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0129",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0130",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0131",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0132",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0133",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0134",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0135",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0136",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0137",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0138",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0139",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0140",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0141",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0142",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0144",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0145",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0146",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0147",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0148",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0149",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0150",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0151",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0152",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0154",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0157",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0158",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0159",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0160",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0161",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0162",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0163",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0166",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0167",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0168",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0169",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0170",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0173",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0174",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0175",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0176",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0179",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0180",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0181",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0184",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0187",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0188",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0189",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0190",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0193",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0194",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0195",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0196",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0199",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0200",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0201",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0202",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0205",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0206",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0207",
+      "destination": "excluded",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0208",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0209",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0212",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0213",
+      "destination": "summary",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0214",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0215",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0218",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0219",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0222",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0223",
+      "destination": "slides",
+      "reason": "actual response"
+    },
+    {
+      "sourceUnitId": "b_0224",
+      "destination": "summary",
+      "reason": "actual response"
+    }
+  ]
+}

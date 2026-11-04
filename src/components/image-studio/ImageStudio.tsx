@@ -1,0 +1,557 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import {
+  Sparkle,
+  DownloadSimple,
+  ArrowSquareOut,
+  Image as ImageIcon,
+  Warning,
+  X,
+  Copy,
+  Check,
+} from "@/components/ui/icon";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTranslation } from "@/hooks/useTranslation";
+import { useAccount } from "@/hooks/useAccount";
+import { showToast } from "@/hooks/useToast";
+import { cn, parseDBDate } from "@/lib/utils";
+
+const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
+const COUNTS = [1, 2, 3, 4] as const;
+// Models whose outputs belong in this studio's conversation history.
+const STUDIO_MODEL_PREFIXES = ["qwen-image", "gpt-image"];
+
+/** 账号下发的可选图片模型（来自 GET /api/image/config）。 */
+interface ImageModelOption {
+  id: string;
+  label: string;
+  default?: boolean;
+}
+
+interface GeneratedImage {
+  mimeType: string;
+  localPath: string;
+}
+
+interface StudioMessage {
+  id: string;
+  prompt: string;
+  count: number;
+  status: "loading" | "done" | "error";
+  images: GeneratedImage[];
+  error?: string;
+  /** 生成时间。历史条目取 gallery 的 created_at(UTC),新生成的取本地当前时间。 */
+  createdAt: Date;
+}
+
+interface GalleryHistoryItem {
+  id: string;
+  prompt: string;
+  model: string;
+  created_at: string;
+  images: GeneratedImage[];
+}
+
+function imageUrl(localPath: string): string {
+  return `/api/media/serve?path=${encodeURIComponent(localPath)}`;
+}
+
+/** 生成时间显示格式:年-月-日 时:分:秒(本地时区,补零)。 */
+function formatTimestamp(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ` +
+    `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`
+  );
+}
+
+let msgSeq = 0;
+function nextId(): string {
+  msgSeq += 1;
+  return `m${msgSeq}-${msgSeq}`;
+}
+
+export function ImageStudio() {
+  const { t } = useTranslation();
+  const { authenticated, triggerLogin } = useAccount();
+
+  const [prompt, setPrompt] = useState("");
+  const [models, setModels] = useState<ImageModelOption[]>([]);
+  const [model, setModel] = useState<string>("");
+  const [configured, setConfigured] = useState<boolean>(true); // 乐观默认，fetch 后校正
+  const [aspectRatio, setAspectRatio] = useState<string>(ASPECT_RATIOS[0]);
+  const [count, setCount] = useState<number>(1);
+
+  const [loading, setLoading] = useState(false);
+  const [messages, setMessages] = useState<StudioMessage[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  // 刚复制过的那条,用于把按钮图标短暂切成对勾
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 是否应保持贴底。用户手动向上滚动后置 false,再滚回底部恢复 true。
+  const stickToBottom = useRef(true);
+
+  // 账号下发的图片模型列表 + 是否已配置可用凭证。登录态变化后重新拉取（登录后即生效）。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/image/config");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const list: ImageModelOption[] = Array.isArray(data.models) ? data.models : [];
+        setModels(list);
+        setConfigured(!!data.configured);
+        setModel((prev) => {
+          if (prev && list.some((m) => m.id === prev)) return prev;
+          const def = list.find((m) => m.default) ?? list[0];
+          return def?.id ?? (typeof data.model === "string" ? data.model : "");
+        });
+      } catch {
+        /* best-effort — 下拉留空时禁用生成 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated]);
+
+  // Load past generations as a conversation (oldest → newest). Rows from a
+  // single multi-image generation share prompt + created_at, so we group them.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/media/gallery?limit=60&sort=newest");
+        if (!res.ok) return;
+        const data = await res.json();
+        const items: GalleryHistoryItem[] = (data.items || []).filter(
+          (it: GalleryHistoryItem) =>
+            typeof it.model === "string" &&
+            STUDIO_MODEL_PREFIXES.some((p) => it.model.startsWith(p)) &&
+            Array.isArray(it.images) &&
+            it.images.length > 0,
+        );
+        const groups = new Map<string, StudioMessage>();
+        for (const it of items) {
+          const key = `${it.created_at}__${it.prompt}`;
+          let g = groups.get(key);
+          if (!g) {
+            g = {
+              id: it.id,
+              prompt: it.prompt,
+              count: 0,
+              status: "done",
+              images: [],
+              createdAt: parseDBDate(it.created_at),
+            };
+            groups.set(key, g);
+          }
+          g.images.push(...it.images);
+        }
+        const ordered = [...groups.values()].reverse(); // oldest first
+        if (!cancelled) setMessages(ordered);
+      } catch {
+        /* history is best-effort */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 保持贴底。
+  //
+  // 以前是 messages 变化时 `bottomRef.scrollIntoView({behavior:'smooth'})`,
+  // 但历史里的图片是异步加载的:平滑滚动动画结束时图片还没解码,容器高度随后
+  // 又被撑高几千像素,结果进模块看到的是列表中间而不是最新一条。
+  // 改成用 ResizeObserver 盯住内容高度,只要处于贴底状态就把 scrollTop 顶到底,
+  // 图片一张张加载完也会跟着校正到位。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const pin = () => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    };
+    pin();
+    const ro = new ResizeObserver(pin);
+    // 观察内容包裹层:它的高度随图片加载增长,容器自身高度是不变的
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [messages]);
+
+  // 用户手动上滚就停止贴底,滚回底部(容差 24px)恢复。
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  }, []);
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
+
+  const handleGenerate = useCallback(async () => {
+    const p = prompt.trim();
+    if (!p) {
+      showToast({ type: "warning", message: t("imageStudio.promptRequired") });
+      return;
+    }
+    if (!configured) {
+      showToast({ type: "warning", message: t("imageStudio.loginRequired") });
+      return;
+    }
+    const id = nextId();
+    setMessages((prev) => [
+      ...prev,
+      { id, prompt: p, count, status: "loading", images: [], createdAt: new Date() },
+    ]);
+    setPrompt("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/image/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: p, model, aspectRatio, n: count }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // 412 = 无可用凭证（未登录/未下发）→ 同步降级态，提示登录（本地化文案）。
+        if (res.status === 412) {
+          setConfigured(false);
+          throw new Error(t("imageStudio.loginRequired"));
+        }
+        throw new Error(data?.error || t("imageStudio.failed"));
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === id
+            ? {
+                ...m,
+                status: "done",
+                images: Array.isArray(data.images) ? data.images : [],
+                // 落库时间取的是生成完成时刻,这里跟着刷新,免得刷新页面后
+                // 从 gallery 读回来的时间与刚才显示的对不上。
+                createdAt: new Date(),
+              }
+            : m,
+        ),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("imageStudio.failed");
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "error", error: msg } : m)));
+      showToast({ type: "error", message: msg });
+    } finally {
+      setLoading(false);
+    }
+  }, [prompt, model, aspectRatio, count, configured, t]);
+
+  const handleCopyPrompt = useCallback(
+    async (id: string, text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // 剪贴板 API 不可用(无安全上下文等)时退回到 execCommand
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiedId(id);
+      showToast({ type: "success", message: t("common.copied") });
+      window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    },
+    [t],
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (!loading) handleGenerate();
+    }
+  };
+
+  const isEmpty = messages.length === 0;
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden bg-background">
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-border/40 px-6 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Sparkle size={18} weight="fill" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold leading-tight">{t("imageStudio.title")}</h1>
+            <p className="text-xs text-muted-foreground">{t("imageStudio.subtitle")}</p>
+          </div>
+        </div>
+        <Link href="/gallery">
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-muted-foreground">
+            <ArrowSquareOut size={14} />
+            {t("imageStudio.openInGallery")}
+          </Button>
+        </Link>
+      </div>
+
+      {/* Conversation flow (scrollable) */}
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-6">
+          {isEmpty ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <ImageIcon size={26} />
+              </div>
+              <p className="text-sm font-medium">{t("imageStudio.emptyTitle")}</p>
+              <p className="max-w-xs text-xs text-muted-foreground">{t("imageStudio.emptyHint")}</p>
+            </div>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className="group/turn flex flex-col gap-3">
+                {/* User prompt — right bubble。
+                    select-text + cursor-text 显式放开拖选(容器链上任何一层将来加了
+                    select-none 都不会再波及这里);旁边常备一个复制按钮,不依赖拖选。 */}
+                <div className="flex items-end justify-end gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleCopyPrompt(m.id, m.prompt)}
+                    title={t("common.copy")}
+                    aria-label={t("common.copy")}
+                    className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/turn:opacity-100 focus-visible:opacity-100"
+                  >
+                    {copiedId === m.id ? <Check size={14} /> : <Copy size={14} />}
+                  </Button>
+                  <div className="max-w-[78%] cursor-text select-text whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+                    {m.prompt}
+                  </div>
+                </div>
+
+                {/* Assistant images — left */}
+                <div className="flex justify-start gap-2.5">
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Sparkle size={14} weight="fill" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {m.status === "loading" && (
+                      <div className={cn("grid gap-2", m.count > 1 ? "max-w-md grid-cols-2" : "max-w-xs grid-cols-1")}>
+                        {Array.from({ length: m.count }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="flex aspect-square items-center justify-center rounded-xl border border-border/50 bg-muted/40"
+                          >
+                            <Spinner className="size-5 text-muted-foreground" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {m.status === "error" && (
+                      <div className="flex max-w-md items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                        <Warning size={14} className="mt-0.5 shrink-0" />
+                        <span className="break-words">{m.error}</span>
+                      </div>
+                    )}
+
+                    {m.status === "done" && (
+                      <div className={cn(m.images.length > 1 ? "max-w-xl" : "max-w-md")}>
+                        <div className={cn("grid gap-2", m.images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                          {m.images.map((img, i) => (
+                            <button
+                              key={img.localPath}
+                              type="button"
+                              onClick={() => setLightbox(imageUrl(img.localPath))}
+                              className="group relative cursor-zoom-in overflow-hidden rounded-xl border border-border/50 bg-muted/40"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={imageUrl(img.localPath)}
+                                alt={`${m.prompt} ${i + 1}`}
+                                loading="lazy"
+                                className="max-h-[440px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                        {/* 生成时间 */}
+                        <div className="mt-1.5 select-text text-[11px] tabular-nums text-muted-foreground/70">
+                          {formatTimestamp(m.createdAt)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Composer (always visible) */}
+      <div className="shrink-0 border-t border-border/40 bg-background/80 px-6 py-3 backdrop-blur">
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="rounded-xl border border-border bg-card/60 p-2 shadow-sm focus-within:border-primary/40">
+            {!configured && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                <span className="flex items-center gap-1.5">
+                  <Warning size={14} className="shrink-0" />
+                  {t("imageStudio.loginRequired")}
+                </span>
+                {!authenticated && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => void triggerLogin()}
+                  >
+                    {t("imageStudio.goLogin")}
+                  </Button>
+                )}
+              </div>
+            )}
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={t("imageStudio.promptPlaceholder")}
+              rows={2}
+              className="min-h-[44px] resize-none border-0 bg-transparent px-2 py-1.5 text-sm shadow-none focus-visible:ring-0"
+            />
+            <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+              {/* Model selector — 账号下发的可选模型；列表为空时禁用 */}
+              <Select value={model} onValueChange={setModel} disabled={models.length === 0}>
+                <SelectTrigger size="sm" className="h-8 w-auto gap-1.5 text-xs">
+                  <SelectValue placeholder={t("imageStudio.model")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                      {m.label || m.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Segmented
+                label={t("imageStudio.aspectRatio")}
+                options={ASPECT_RATIOS as readonly string[]}
+                value={aspectRatio}
+                onChange={setAspectRatio}
+              />
+              <Segmented
+                label={t("imageStudio.count")}
+                options={COUNTS.map(String)}
+                value={String(count)}
+                onChange={(v) => setCount(Number(v))}
+              />
+
+              <div className="ml-auto">
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5 px-4 text-xs"
+                  disabled={loading || !prompt.trim() || !configured || !model}
+                  onClick={handleGenerate}
+                >
+                  {loading ? <Spinner className="size-3.5" /> : <Sparkle size={14} weight="fill" />}
+                  {loading ? t("imageStudio.generating") : t("imageStudio.generate")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* In-app lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm sm:p-10"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+          >
+            <X size={18} />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="preview"
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+          />
+          <a
+            href={lightbox}
+            download
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-4 right-4 flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-xs text-white transition-colors hover:bg-white/20"
+          >
+            <DownloadSimple size={14} />
+            {t("imageStudio.download")}
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Segmented({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground/70">{label}</span>
+      <div className="flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            className={cn(
+              "rounded px-2 py-1 text-[11px] font-medium transition-colors",
+              value === opt
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

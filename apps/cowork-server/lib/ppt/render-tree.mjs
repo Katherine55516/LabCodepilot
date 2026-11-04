@@ -1,0 +1,268 @@
+import {fitSystemTitleFrames} from '../ppt-system-title-fit.mjs';
+import {fitNativeTextFrames,fitSourceMathFrames,fitNativeSectionDecorations} from '../ppt-native-text-fit.mjs';
+import {componentElements} from './component-layout.mjs';
+import { visibleNodes } from '../ppt-visible-content.mjs';
+import crypto from 'node:crypto';
+import { applyRenderContract, prepareNativeTextElement, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
+import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
+import { applyLayoutRegistry, regionsFor, typographyFor } from '../ppt-layout.mjs';
+import { ensureDeckV3, ensureSlideV3, materializeLegacySlide, stableId } from './ir.mjs';
+import { layoutPoints } from './point-layout.mjs';
+import {processCardPlan} from '../ppt-process-cards.mjs';
+import {diagramCardPlan,flowConnectors} from '../ppt-diagram-cards.mjs';
+import {templateTextColor} from '../ppt-template-colors.mjs';
+import {previewFontFamily} from './font-family.mjs';
+
+function sourceProcessLayout(element){
+  const manualSize=element.textStyleOverrides?.includes('fontSizePt');
+  const manualLine=element.textStyleOverrides?.includes('lineHeight');
+  const baselineFont=element.content?.processCards?.version===1?Number(element.style?.fontSizePt)||Number(element.content?.pointLayout?.fontSizePt):Number(element.content?.pointLayout?.fontSizePt)||Number(element.style?.fontSizePt);
+  const font=Number(manualSize?element.style?.fontSizePt:baselineFont)||18;
+  const lineHeight=Number(manualLine?element.style?.lineHeight:element.content?.pointLayout?.lineHeight)||1.18;
+  if(element.kind==='list'&&element.content?.pointLayout&&(manualSize||manualLine)&&!element.content?.diagram&&!element.content?.processCards){
+    const plan=layoutPoints(element.content.items,{w:element.bounds.width/914400,h:element.bounds.height/914400},{fontSizePt:font,lineHeight,columns:element.content.pointLayout.columns});
+    return {...element,content:{...element.content,pointLayout:{...element.content.pointLayout,...plan}}};
+  }
+  // Native diagrams (layer bands, card grid, KPI tiles) re-measure from the
+  // final frame exactly like process cards; React/SVG/PPTX share the boxes.
+  if(element.content?.diagram?.version===1&&element.kind==='list'){
+    const plan=diagramCardPlan(element.content,element.bounds,font,{lineHeight,fixedFont:manualSize||manualLine});
+    if(!plan)return element;
+    return {...element,content:{...element.content,pointLayout:{...(element.content.pointLayout||{}),boxes:plan.boxes,...(plan.connectors?{connectors:plan.connectors}:{}),fontSizePt:plan.fontSizePt,lineHeight:plan.lineHeight||lineHeight,columns:plan.columns,overflow:plan.overflow,suggestedSplitCount:plan.suggestedSplitCount,variant:plan.kind,headingScale:plan.headingScale,...(plan.headingFontSizePt?{headingFontSizePt:plan.headingFontSizePt}:{}),inlineHeading:plan.inlineHeading,...(plan.markers?{markers:plan.markers,markerInches:plan.markerInches}:{})}}};
+  }
+  if(element.content?.processCards?.version!==1)return element;
+  const plan=processCardPlan(element.content,element.bounds,font,{lineHeight});
+  if(!plan)return element;
+  // Ordered source steps are a flow: each card points to the next one.
+  // A rail replaces the arrows (Fable M2); the template's panel colours stay (M1).
+  const prior=element.content.pointLayout||{};
+  return {...element,kind:'list',content:{...element.content,items:plan.items,pointLayout:{boxes:plan.boxes,fontSizePt:plan.fontSizePt,lineHeight:plan.lineHeight||lineHeight,columns:plan.columns,overflow:plan.overflow,suggestedSplitCount:plan.suggestedSplitCount,variant:'flow',...(plan.rail?{rail:plan.rail}:{connectors:flowConnectors(plan.boxes)}),...(prior.accent?{accent:prior.accent}:{}),...(prior.panelFill?{panelFill:prior.panelFill}:{}),...(prior.panelText?{panelText:prior.panelText}:{})}}};
+}
+
+export const EMU_PER_INCH = 914400;
+export const SLIDE_SIZE = Object.freeze({ width: 12192000, height: 6858000 });
+
+const emu = value => Math.round(Number(value || 0) * EMU_PER_INCH);
+const bounds = region => ({ x: emu(region.x), y: emu(region.y), width: emu(region.w), height: emu(region.h) });
+
+function regionMap(slide) { return Object.fromEntries(regionsFor(slide).map(region => [region.id, region])); }
+
+function style(project, typography, role) {
+  const fonts = project.templateSpec?.fonts || {};
+  const palette = project.templateSpec?.palette || {};
+  const tokens = project.deck?.themeTokens || {};
+  const title = role === 'title';
+  return {
+    fontFamily: title ? fonts.title : fonts.body,
+    eastAsiaFontFamily: title ? fonts.titleEastAsia : fonts.bodyEastAsia,
+    eastAsiaFontFamilyHant: title ? (fonts.titleEastAsiaHant || fonts.titleEastAsia) : (fonts.bodyEastAsiaHant || fonts.bodyEastAsia),
+    fontSizePt: title ? Math.round((typography.titlePt || 36) * (tokens.titleScale || 1) * 10) / 10
+      : Math.round((typography.bodyPt || 18) * (tokens.bodyScale || 1) * 10) / 10,
+    lineHeight: title ? 1.05 : (typography.lineHeight || 1.12) * (tokens.spacingScale || 1),
+    paragraphSpacingEm: title ? 0 : (typography.paragraphSpacingEm ?? .5) * (tokens.spacingScale || 1),
+    color: title ? palette.foreground : palette.muted,
+    fontWeight: title ? 700 : 400,
+  };
+}
+
+function splitBounds(region, count, index, axis = 'x') {
+  if (count <= 1) return bounds(region);
+  const gap = .18;
+  if (axis === 'y') {
+    const h = (region.h - gap * (count - 1)) / count;
+    return bounds({ ...region, y: region.y + index * (h + gap), h });
+  }
+  const w = (region.w - gap * (count - 1)) / count;
+  return bounds({ ...region, x: region.x + index * (w + gap), w });
+}
+
+function element(node, kind, region, content, nodeStyle, zIndex, extra = {}) {
+  const geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key])) ? node.geometry : bounds(region);
+  return { id: node.id, nodeId: node.id, kind:node.content?.processCards?.version===1?'list':kind, bounds: geometry, content, textStyleOverrides:node.textStyleOverrides, style: { ...(nodeStyle || {}), ...(node.style || {}) }, zIndex: Number(node.zIndex ?? zIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), userGeometry:node.userGeometry, groupId: node.groupId || null, ...extra };
+}
+
+function adaptiveList(node, region, slide, project) {
+  const content = { ...(node.content || {}) };
+  const actualRegion=node.geometry ? {w:node.geometry.width/914400,h:node.geometry.height/914400} : region;
+  const plan = layoutPoints(content.items || [], actualRegion, {
+    ...(node.textStyleOverrides?.includes('fontSizePt')?{fontSizePt:node.style.fontSizePt}:{}),
+    ...(node.textStyleOverrides?.includes('lineHeight')?{lineHeight:node.style.lineHeight}:{}),
+    distributionType: slide.copy?.distributionType,
+    density: slide.copy?.density,
+    depth: slide.copy?.depth,
+    bodyScale: (project.deck?.themeTokens?.bodyScale || 1) * (slide.stylePreference?.bodyScale || 1),
+  });
+  content.pointLayout = plan;
+  return { content, fontSizePt: plan.fontSizePt };
+}
+
+function buildPreservedSlide(project, slide, index) {
+  fitSourceMathFrames(slide,project);
+  fitNativeTextFrames(project,slide);
+  fitNativeSectionDecorations(project,slide,index);
+  const origin=project.templateFidelity || project.externalPptx, originIndex=slide.templateSlideIndex ?? slide.nativeSlideIndex;
+  const source = origin.slides?.[index] || origin.sourceCatalog?.[origin.slideMap?.[originIndex]??originIndex] || {background:slide.nativeBackground};
+  const elements = visibleNodes(slide).filter(node => node.nativeRef?.slideIndex === originIndex || isSourceOwnedNode(node)||node.semanticRole==='closing-greeting'||node.semanticRole==='page-number'&&!node.nativeRef||node.semanticRole==='template-marker'&&!node.nativeRef||node.semanticRole==='title-translation'&&node.content?.derivedFrom==='title-hierarchy'||node.semanticRole==='card-lead'&&!node.nativeRef).map(node => ({
+    id: node.id, nodeId: node.id, kind: node.content?.processCards?.version===1?'list':node.type === 'foreign' ? 'shape' : node.type,
+    bounds: node.geometry, content: node.content || {}, textStyleOverrides:node.textStyleOverrides, userGeometry:node.userGeometry,
+    style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
+      color:node.nativeRef&&node.semanticRole==='template-title'?templateTextColor(project,index,'title').color:project.templateSpec?.palette?.foreground, ...(node.style || {}),
+      previewFontFamily:previewFontFamily(project,node.style?.fontFamily||project.templateSpec?.fonts?.body),
+      ...(previewFontFamily(project,node.style?.fontFamily)&&/bold/iu.test(node.style.fontFamily)?{previewFontWeight:700}:{}) },
+    zIndex: Number(node.zIndex || 0), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), ...(node.pinned ? { pinned: true } : {}),
+    semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,sourceArtifact:node.sourceArtifact,
+    nativeStyleBaseline: node.nativeStyleBaseline || source.nodes?.find(base=>base.nativeRef?.shapeId===(node.nativeRef?.cloneFromShapeId??node.nativeRef?.shapeId))?.style,
+  })).sort((a, b) => a.zIndex - b.zIndex);
+  return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId,
+    size: { width: origin.width || SLIDE_SIZE.width, height: origin.height || SLIDE_SIZE.height },
+    background: source.background || project.templateSpec?.palette?.background, elements: elements.map(sourceProcessLayout).map(applyRenderContract), templatePreserved: true };
+}
+
+function buildSlideUnfitted(project, input, index, total) {
+  if (project.templateFidelity?.mode === 'preserve' && Number.isInteger(input.templateSlideIndex)) return buildPreservedSlide(project, input, index);
+  if (project.externalPptx?.mode === 'preserve' && Number.isInteger(input.nativeSlideIndex)) return buildPreservedSlide(project,input,index);
+  const slide = materializeLegacySlide(input);
+  slide.nodes=visibleNodes(slide);
+  const regions = regionMap(slide);
+  const typography = typographyFor(slide);
+  if (slide.stylePreference?.bodyScale) typography.bodyPt *= slide.stylePreference.bodyScale;
+  const composed=componentElements(project,slide,typography);
+  if(composed) return {id:slide.id,slideId:slide.id,index,layoutId:slide.layoutId,size:SLIDE_SIZE,background:project.templateSpec?.palette?.background,elements:composed};
+  const elements = [];
+  const titleNode = slide.nodes.find(node => node.semanticRole === 'title');
+  const bodyNode = slide.nodes.find(node => node.semanticRole === 'body');
+  const eyebrowNode = slide.nodes.find(node => node.semanticRole === 'eyebrow');
+  const subtitleNode = slide.nodes.find(node => node.semanticRole === 'subtitle');
+  const takeawayNode = slide.nodes.find(node => node.semanticRole === 'takeaway');
+  const nativeTextNodes = slide.nodes.filter(node => !isSourceOwnedNode(node) && node.type === 'text' && !['title', 'body', 'eyebrow', 'subtitle', 'takeaway'].includes(node.semanticRole));
+  const visualNodes = slide.nodes.filter(node => !isSourceOwnedNode(node) && ['image', 'chart', 'table', 'shape', 'foreign'].includes(node.type));
+  const layout = slide.layoutId;
+  if (titleNode && regions.title) elements.push(element(titleNode, 'text', regions.title, titleNode.content, style(project, typography, 'title'), 10, { semanticRole: 'title' }));
+  if (eyebrowNode?.content?.text && regions.eyebrow) elements.push(element(eyebrowNode, 'text', regions.eyebrow, eyebrowNode.content,
+    { ...style(project, { bodyPt: 11 }, 'body'), fontSizePt: 11, fontWeight: 700, color: project.templateSpec?.palette?.accent, textAlign: 'left' }, 11, { semanticRole: 'eyebrow' }));
+  if (subtitleNode?.content?.text && regions.subtitle) elements.push(element(subtitleNode, 'text', regions.subtitle, subtitleNode.content,
+    { ...style(project, { bodyPt: 14 }, 'body'), fontSizePt: 14, textAlign: 'left' }, 12, { semanticRole: 'subtitle' }));
+  if (takeawayNode?.content?.text && regions.takeaway) elements.push(element(takeawayNode, 'text', regions.takeaway, takeawayNode.content,
+    { ...style(project, { bodyPt: 12 }, 'body'), fontSizePt: 12, fontWeight: 700, color: project.templateSpec?.palette?.foreground, textAlign: 'left' }, 25, { semanticRole: 'takeaway' }));
+  for (const node of nativeTextNodes) elements.push(element(node, 'text', regions.body || regions.title, node.content, style(project, typography, 'body'), Number(node.zIndex || 15), { semanticRole: node.semanticRole }));
+
+  if (bodyNode) {
+    let bodyRegion = regions.body || regions.timeline || regions.left || regions.primary;
+    if (layout === 'comparison' && !visualNodes.length) bodyRegion = { x: 1.0, y: 2.26, w: 11.23, h: 4.31 };
+    if (visualNodes.length && layout === 'comparison') bodyRegion = { x: 1.0, y: 5.95, w: 11.23, h: .65 };
+    if (visualNodes.length && layout === 'timeline') bodyRegion = { x: 1.0, y: 2.25, w: 11.25, h: 3.05 };
+    if (visualNodes.length && ['summary', 'editorial', 'conclusion'].includes(layout)) bodyRegion = { ...bodyRegion, w: 7.35 };
+    if (layout === 'big-number') {
+      const items = bodyNode.content?.items || [];
+      const primaryRegion = visualNodes.length ? { x: 1.0, y: 2.15, w: 7.25, h: 2.15 } : regions.primary;
+      const metric = element({ ...bodyNode, id: `${bodyNode.id}_metric` }, 'metric', primaryRegion, { items: items.slice(0, 1) }, style(project, typography, 'body'), 20, { sourceNodeId: bodyNode.id });
+      metric.nodeId = bodyNode.id; elements.push(metric);
+      if (items.length > 1) {
+        const remainder = element({ ...bodyNode, id: `${bodyNode.id}_detail` }, 'list', regions.body, { items: items.slice(1) }, style(project, typography, 'body'), 20, { sourceNodeId: bodyNode.id });
+        remainder.nodeId = bodyNode.id; elements.push(remainder);
+      }
+      bodyRegion = null;
+    }
+    if (bodyRegion) {
+      const kind = bodyNode.type==='text' ? 'text' : layout === 'timeline' ? 'timeline' : 'list';
+      const adaptive = kind === 'list' && bodyRegion.h >= 2 ? adaptiveList(bodyNode, bodyRegion, slide, project) : null;
+      elements.push(element(bodyNode, kind, bodyRegion, adaptive?.content || bodyNode.content,
+        { ...style(project, typography, 'body'), ...(adaptive ? { fontSizePt: adaptive.fontSizePt } : {}) }, 20));
+    }
+  }
+
+  let visualRegion = regions.visual || regions.primary || regions.left || regions.body;
+  if (visualNodes.length && layout === 'big-number') visualRegion = { x: 8.6, y: 2.35, w: 3.2, h: 1.75 };
+  if (visualNodes.length && ['summary', 'editorial', 'conclusion'].includes(layout)) visualRegion = { x: 8.7, y: 2.15, w: 3.55, h: 4.55 };
+  if (visualNodes.length && layout === 'timeline') visualRegion = { x: 1.0, y: 5.55, w: 11.25, h: .8 };
+  const singleVisual=visualNodes.length===1&&!bodyNode?.content?.items?.length&&!bodyNode?.content?.text&&!nativeTextNodes.length;
+  if(singleVisual)visualRegion={x:.86,y:2.15,w:SLIDE_SIZE.width/EMU_PER_INCH-1.72,h:4.5};
+  visualNodes.forEach((node, visualIndex) => {
+    const region = layout === 'comparison'&&!singleVisual
+      ? (() => { const base = visualIndex ? regions.right : regions.left; return { ...base, h: 3.65 }; })()
+      : visualRegion;
+    if (!region) return;
+    let geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key]))
+      ? node.geometry
+      : splitBounds(region, visualNodes.length, visualIndex);
+    if(singleVisual && !node.geometry){
+      const frame=bounds(visualRegion),c=node.content || {};
+      const height=node.type==='table'?Math.min(frame.height,emu(Math.max(1.2,(c.rows?.length||2)*.48))):Math.round(frame.height*.85);
+      const ratio=Number(c.width)/Number(c.height);
+      const width=node.type==='image'&&ratio>0?Math.min(frame.width,Math.round(height*ratio)):Math.round(frame.width*.9);
+      geometry={x:Math.round(frame.x+(frame.width-width)/2),y:Math.round(frame.y+(frame.height-height)/2),width,height};
+    }
+    elements.push({
+      id: node.id, nodeId: node.id, kind: node.content?.processCards?.version===1?'list':node.type, bounds: geometry,
+      content: node.content || {}, style: node.style || {}, zIndex: Number(node.zIndex || 30 + visualIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), userGeometry:node.userGeometry, groupId: node.groupId || null,
+      textStyleOverrides:node.textStyleOverrides,
+    });
+  });
+  for (const node of slide.nodes.filter(isSourceOwnedNode)) elements.push({
+    id:node.id,nodeId:node.id,kind:node.content?.processCards?.version===1?'list':node.type,bounds:node.geometry,content:node.content,
+    style:{...style(project,typography,'body'),...node.style},zIndex:node.zIndex,
+    semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,userGeometry:node.userGeometry,
+    // The author's own formatting reaches the export of source objects too.
+    textStyleOverrides:node.textStyleOverrides,
+  });
+
+  elements.push({
+    id: stableId('decor', slide.id, 'top-band'), nodeId: null, kind: 'shape',
+    bounds: { x: 0, y: 0, width: SLIDE_SIZE.width, height: emu(.13) },
+    content: { shape: 'rect' }, style: { fill: project.templateSpec?.palette?.accent }, zIndex: 0, locked: true,
+  });
+  if (regions.footer) elements.push({
+    id: stableId('decor', slide.id, 'footer'), nodeId: null, kind: 'text', semanticRole:'page-number', bounds: bounds(regions.footer),
+    content: { text: String(index + 1) }, style: { ...style(project, { bodyPt: 10 }, 'body'), fontSizePt: 10, textAlign: 'right' }, zIndex: 100, locked: true,
+  });
+  elements.sort((a, b) => a.zIndex - b.zIndex);
+  return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId, size: SLIDE_SIZE, background: project.templateSpec?.palette?.background, elements: elements.map(sourceProcessLayout).map(applyRenderContract) };
+}
+
+function buildSlide(project,input,index,total){
+ const tree=buildSlideUnfitted(project,input,index,total);
+ // Expose actual card typography to every editor (toolbar and inspector).
+ // The canonical node keeps its template tokens; a pinned author value is
+ // never disguised by a stale plan and still reaches the capacity guard.
+ tree.elements=tree.elements.map(e=>e.kind==='list'&&e.content?.pointLayout?applyRenderContract({...e,style:{...e.style,
+  ...(!e.textStyleOverrides?.includes('fontSizePt')?{fontSizePt:e.content.pointLayout.fontSizePt}:{}),
+  ...(!e.textStyleOverrides?.includes('lineHeight')?{lineHeight:e.content.pointLayout.lineHeight||1.18}:{})}}):e);
+ return fitSystemTitleFrames(tree);
+}
+
+export function buildRenderTree(project, deckInput = project.deck) {
+  const deck = ensureDeckV3(applyLayoutRegistry(deckInput));
+  const slides = deck.slides.map((slide, index) => buildSlide(project, slide, index, deck.slides.length));
+  const scene = { schemaVersion: 1, renderContractVersion: RENDER_CONTRACT_VERSION, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
+  scene.hash = crypto.createHash('sha256').update(JSON.stringify(scene)).digest('hex');
+  return scene;
+}
+
+export function rebuildRenderTree(project, previous, affectedSlideIds = []) {
+  if (!previous || previous.renderContractVersion!==RENDER_CONTRACT_VERSION || !affectedSlideIds.length) return buildRenderTree(project);
+  const deck = ensureDeckV3(applyLayoutRegistry(project.deck));
+  const affected = new Set(affectedSlideIds);
+  const old = new Map(previous.slides?.map(slide => [slide.id, slide]) || []);
+  const slides = deck.slides.map((slide, index) => affected.has(slide.id) || !old.has(slide.id)
+    ? buildSlide(project, slide, index, deck.slides.length)
+    : { ...old.get(slide.id), index });
+  const scene = { schemaVersion: 1, renderContractVersion: RENDER_CONTRACT_VERSION, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
+  scene.hash = crypto.createHash('sha256').update(JSON.stringify(scene)).digest('hex');
+  return scene;
+}
+
+export function buildSlideRenderTree(project, slideId) {
+  const slides=project.deck?.slides||[],index=slides.findIndex(slide=>slide.id===slideId);
+  if(index<0)return null;
+  // Preserve the actual deck index/template slot/footer and total page count,
+  // but clone and lay out only this page. A per-page preview must not rebuild
+  // every native image and run the whole-deck review for every writer update.
+  const selected=applyLayoutRegistry({slides:slides.map((slide,position)=>position===index?slide:{id:slide.id,layoutId:'summary',nodes:[],bullets:[]})}).slides[index];
+  return buildSlide(project,ensureSlideV3(selected,index),index,slides.length);
+}
+
+export function boundsIntersect(a, b) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+export const _internals = { emu, bounds, splitBounds, buildSlide };

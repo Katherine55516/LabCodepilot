@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {fitSourceLayout} from './lib/ppt-source-layout-fit.mjs';
+import {fitComponents,sourceComponentParts} from './lib/ppt-density-capacity.mjs';
+import {candidateFit} from './lib/ppt-density-packing.mjs';
+import {bindSourceArtifacts} from './lib/ppt-source-artifacts.mjs';
+const I=914400,box=(x,y,width,height)=>Object.fromEntries(Object.entries({x,y,width,height}).map(([k,v])=>[k,Math.round(v*I)]));
+const page={nodes:[{id:'title',type:'text',nativeRef:{shapeId:1},geometry:box(.7,.7,10.6,.6),style:{fontSizePt:36},content:{text:'Process'}},{id:'body',type:'text',nativeRef:{shapeId:2},geometry:box(.7,1.8,10.6,4.2),style:{fontSizePt:14.5},content:{text:'Body'}},{id:'art',type:'image',nativeRef:{shapeId:3},geometry:box(5.6,2,1.5,3.7),content:{mediaRole:'template_artwork',dataUrl:'data:image/png;base64,AA=='}}],slots:[{shapeId:1,role:'title'},{shapeId:2,role:'content',purpose:'body'}]};
+const items=[0,1].map((n)=>({id:'flow'+n,type:'ProcessBlock',text:Array.from({length:9},(_,i)=>`${n*9+i+1}. Validate stage ${n*9+i+1}`).join('\n'),diagramSource:{kind:'text-flow'},source_ref:['c'],chunkRefs:['c'],must_preserve_structure:true}));
+const p={templateSpec:{fonts:{body:'Source Sans 3'},palette:{background:'#fff',foreground:'#111',accent:'#172c48'}},templateFidelity:{width:12*I,height:7.5*I,slides:[page,page]},outline:[{id:'cover'},{id:'process',title:'Process',sourceUnitIds:items.map(i=>i.id)}],source:{semantic:{inventory:{items,relationships:[]}}},planning:{slidePlan:[{slideId:'process',sourceArtifacts:items.map(item=>({sourceUnitId:item.id}))}]}};
+const components=items.flatMap(item=>sourceComponentParts(item)),before=JSON.stringify(components),base=fitComponents(components,p,1),fit=fitSourceLayout(components,p,1);
+assert.equal(base.capacity_ok,false,'two complete ordered processes do not fit a single stack');
+assert.equal(fit.capacity_ok,true,'the same complete processes fit the measured media columns');assert.equal(fit.layoutId,'media-preserving-columns');assert.equal(fit.fontSizePt,base.fontSizePt);assert.equal(JSON.stringify(components),before);assert.ok(fit.keptMediaShapeIds.includes(3));
+for(const b of fit.boxes){assert.ok(b.x>=fit.canvas.x&&b.y>=fit.canvas.y);assert.ok(b.x+b.width<=fit.canvas.x+fit.canvas.width+1&&b.y+b.height<=fit.canvas.y+fit.canvas.height+1);}
+const planned=candidateFit(p.outline[1],p,1);assert.equal(planned.capacity_ok,true);assert.equal(planned.layoutId,fit.layoutId);
+const slide=bindSourceArtifacts(structuredClone(p),{id:'process',nodes:[],copy:{}},items.map(item=>({sourceUnitId:item.id})),1);
+assert.equal(slide.sourceArtifactFit.layoutId,fit.layoutId);assert.equal(slide.sourceArtifactNodes.length,2);assert.deepEqual(slide.sourceArtifactNodes.flatMap(n=>n.content.items.map(i=>i.text)),items.flatMap(i=>i.text.split('\n')));
+const edited=structuredClone(p);edited.editing={epochs:{process:1}};assert.equal(fitSourceLayout(components,edited,1).capacity_ok,false,'manual geometry is not rescued through a new automatic layout');
+const tooTall=[{type:'timeline',content:{items:Array.from({length:80},(_,i)=>({text:`${i+1}. Required stage`}))}}];assert.equal(fitSourceLayout(tooTall,p,1).capacity_ok,false);
+const tooWide=[{type:'text',content:{text:'W'.repeat(400),codeBlock:{preserveLayout:true}}}];assert.equal(fitSourceLayout(tooWide,p,1).capacity_ok,false,'unwrapped source width cannot be hidden by columns');
+const plain={...p,templateFidelity:undefined,outline:p.outline};const process=[{type:'timeline',content:{items:Array.from({length:10},(_,i)=>({text:`${i+1}. Stage ${i+1}`}))}}],original=fitComponents(process,plain,1),centered=fitSourceLayout(process,plain,1);
+assert.equal(centered.capacity_ok,true);assert.ok(centered.boxes[0].width<original.boxes[0].width*.85);assert.ok(Math.abs(centered.boxes[0].x+centered.boxes[0].width/2-original.canvas.x-original.canvas.width/2)<=1);assert.equal(centered.fontSizePt,original.fontSizePt);assert.equal(centered.measurements[0].height,original.measurements[0].height);assert.equal(JSON.stringify(process),JSON.stringify([{type:'timeline',content:{items:Array.from({length:10},(_,i)=>({text:`${i+1}. Stage ${i+1}`}))}}]));
+const manual={...plain,editing:{epochs:{process:1}}};assert.equal(fitSourceLayout(process,manual,1).boxes[0].width,original.boxes[0].width);
+console.log('PASS: shared planner/writer media fit, complete atomic sources and retained media/font; genuine height/width/manual failures remain blocked; ordered processes center without copy or height changes.');

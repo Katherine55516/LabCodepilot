@@ -1,0 +1,18 @@
+{
+  "name": "ai-lab-test-marketplace",
+  "owner": {
+    "name": "yeqb001",
+    "url": "https://github.com/qitianersheng"
+  },
+  "metadata": {
+    "description": "AI_LabTest QA 自动化测试插件的官方分发源（marketplace）",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "ai-lab-test",
+      "source": "./",
+      "description": "把 Claude Code 当成 QA 自动化工程师，按 3 步强制工作流（用例设计→AI 实时驱动 Playwright 执行→报告）交付自动化测试。用例设计以用户提供的需求文档或现成用例为输入。四态结果、用户门控、零源码修改、可追溯。"
+    }
+  ]
+}

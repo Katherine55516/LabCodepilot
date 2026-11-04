@@ -1,0 +1,978 @@
+{
+"version": 1,
+"domain": "quant-finance-ml",
+"note": "English term → accepted Chinese renderings (first is preferred) and literal mistranslations to replace. Matching is whole-word and case-insensitive on the English half.",
+"terms": [
+{
+"en": "universe",
+"zh": [
+"股票池",
+"标的池",
+"投资范围",
+"样本池"
+],
+"avoid": [
+"宇宙"
+]
+},
+{
+"en": "factor zoo",
+"zh": [
+"因子动物园"
+],
+"avoid": []
+},
+{
+"en": "factor",
+"zh": [
+"因子"
+],
+"avoid": [
+"因素"
+]
+},
+{
+"en": "alpha",
+"zh": [
+"阿尔法",
+"超额收益",
+"α"
+],
+"avoid": []
+},
+{
+"en": "beta",
+"zh": [
+"贝塔",
+"β"
+],
+"avoid": [
+"测试版"
+]
+},
+{
+"en": "momentum",
+"zh": [
+"动量"
+],
+"avoid": [
+"势头"
+]
+},
+{
+"en": "value",
+"zh": [
+"价值"
+],
+"avoid": []
+},
+{
+"en": "size",
+"zh": [
+"规模",
+"市值"
+],
+"avoid": [
+"尺寸"
+]
+},
+{
+"en": "quality",
+"zh": [
+"质量"
+],
+"avoid": [
+"品质"
+]
+},
+{
+"en": "low volatility",
+"zh": [
+"低波动"
+],
+"avoid": []
+},
+{
+"en": "volatility",
+"zh": [
+"波动率",
+"波动"
+],
+"avoid": [
+"挥发性"
+]
+},
+{
+"en": "drawdown",
+"zh": [
+"回撤"
+],
+"avoid": [
+"提款",
+"下拉"
+]
+},
+{
+"en": "backtest",
+"zh": [
+"回测"
+],
+"avoid": [
+"后测"
+]
+},
+{
+"en": "overfitting",
+"zh": [
+"过拟合"
+],
+"avoid": [
+"过度装配"
+]
+},
+{
+"en": "look-ahead bias",
+"zh": [
+"前视偏差",
+"未来函数",
+"前瞻偏差"
+],
+"avoid": []
+},
+{
+"en": "survivorship bias",
+"zh": [
+"幸存者偏差",
+"生存者偏差"
+],
+"avoid": []
+},
+{
+"en": "data snooping",
+"zh": [
+"数据窥探",
+"数据挖掘偏差"
+],
+"avoid": []
+},
+{
+"en": "p-hacking",
+"zh": [
+"p值操纵",
+"p 值操纵",
+"p-hacking"
+],
+"avoid": []
+},
+{
+"en": "multiple testing",
+"zh": [
+"多重检验",
+"多重假设检验"
+],
+"avoid": [
+"多次测试"
+]
+},
+{
+"en": "sharpe ratio",
+"zh": [
+"夏普比率"
+],
+"avoid": [
+"锐利比率"
+]
+},
+{
+"en": "information ratio",
+"zh": [
+"信息比率"
+],
+"avoid": []
+},
+{
+"en": "information coefficient",
+"zh": [
+"信息系数",
+"IC"
+],
+"avoid": []
+},
+{
+"en": "turnover",
+"zh": [
+"换手率",
+"换手"
+],
+"avoid": [
+"营业额",
+"周转率"
+]
+},
+{
+"en": "transaction cost",
+"zh": [
+"交易成本"
+],
+"avoid": [
+"事务成本"
+]
+},
+{
+"en": "slippage",
+"zh": [
+"滑点"
+],
+"avoid": [
+"打滑"
+]
+},
+{
+"en": "capacity",
+"zh": [
+"容量"
+],
+"avoid": []
+},
+{
+"en": "crowding",
+"zh": [
+"拥挤",
+"拥挤度"
+],
+"avoid": [
+"人群"
+]
+},
+{
+"en": "neutralization",
+"zh": [
+"中性化"
+],
+"avoid": []
+},
+{
+"en": "neutralize",
+"zh": [
+"中性化"
+],
+"avoid": []
+},
+{
+"en": "winsorize",
+"zh": [
+"缩尾",
+"缩尾处理"
+],
+"avoid": []
+},
+{
+"en": "winsorized",
+"zh": [
+"缩尾",
+"缩尾处理"
+],
+"avoid": []
+},
+{
+"en": "standardize",
+"zh": [
+"标准化"
+],
+"avoid": []
+},
+{
+"en": "cross-section",
+"zh": [
+"横截面",
+"截面"
+],
+"avoid": [
+"交叉部分"
+]
+},
+{
+"en": "cross-sectional",
+"zh": [
+"横截面",
+"截面"
+],
+"avoid": [
+"交叉"
+]
+},
+{
+"en": "time series",
+"zh": [
+"时间序列",
+"时序"
+],
+"avoid": []
+},
+{
+"en": "time-series",
+"zh": [
+"时间序列",
+"时序"
+],
+"avoid": []
+},
+{
+"en": "panel data",
+"zh": [
+"面板数据"
+],
+"avoid": []
+},
+{
+"en": "residual",
+"zh": [
+"残差"
+],
+"avoid": []
+},
+{
+"en": "regression",
+"zh": [
+"回归"
+],
+"avoid": [
+"倒退",
+"退化"
+]
+},
+{
+"en": "classification",
+"zh": [
+"分类"
+],
+"avoid": []
+},
+{
+"en": "label",
+"zh": [
+"标签"
+],
+"avoid": []
+},
+{
+"en": "feature",
+"zh": [
+"特征"
+],
+"avoid": []
+},
+{
+"en": "feature engineering",
+"zh": [
+"特征工程"
+],
+"avoid": [
+"功能工程"
+]
+},
+{
+"en": "cross-validation",
+"zh": [
+"交叉验证"
+],
+"avoid": []
+},
+{
+"en": "purged",
+"zh": [
+"净化",
+"清除"
+],
+"avoid": []
+},
+{
+"en": "purging",
+"zh": [
+"净化",
+"清除"
+],
+"avoid": []
+},
+{
+"en": "embargo",
+"zh": [
+"禁运期",
+"隔离期"
+],
+"avoid": [
+"禁运"
+]
+},
+{
+"en": "walk-forward",
+"zh": [
+"滚动前推",
+"前推",
+"滚动"
+],
+"avoid": [
+"向前走"
+]
+},
+{
+"en": "out-of-sample",
+"zh": [
+"样本外"
+],
+"avoid": [
+"样品外"
+]
+},
+{
+"en": "in-sample",
+"zh": [
+"样本内"
+],
+"avoid": [
+"样品内"
+]
+},
+{
+"en": "hyperparameter",
+"zh": [
+"超参数"
+],
+"avoid": []
+},
+{
+"en": "gradient boosting",
+"zh": [
+"梯度提升"
+],
+"avoid": []
+},
+{
+"en": "random forest",
+"zh": [
+"随机森林"
+],
+"avoid": []
+},
+{
+"en": "neural network",
+"zh": [
+"神经网络"
+],
+"avoid": []
+},
+{
+"en": "regularization",
+"zh": [
+"正则化"
+],
+"avoid": []
+},
+{
+"en": "shrinkage",
+"zh": [
+"收缩"
+],
+"avoid": []
+},
+{
+"en": "risk premium",
+"zh": [
+"风险溢价"
+],
+"avoid": [
+"风险保费"
+]
+},
+{
+"en": "premium",
+"zh": [
+"溢价"
+],
+"avoid": [
+"保费"
+]
+},
+{
+"en": "anomaly",
+"zh": [
+"异象",
+"异常"
+],
+"avoid": []
+},
+{
+"en": "mispricing",
+"zh": [
+"错误定价",
+"错误定价因子"
+],
+"avoid": []
+},
+{
+"en": "arbitrage",
+"zh": [
+"套利"
+],
+"avoid": []
+},
+{
+"en": "limits to arbitrage",
+"zh": [
+"套利限制"
+],
+"avoid": []
+},
+{
+"en": "book-to-market",
+"zh": [
+"账面市值比",
+"市净率倒数"
+],
+"avoid": [
+"书到市场"
+]
+},
+{
+"en": "market capitalization",
+"zh": [
+"市值"
+],
+"avoid": []
+},
+{
+"en": "profitability",
+"zh": [
+"盈利能力",
+"盈利"
+],
+"avoid": [
+"收益性"
+]
+},
+{
+"en": "investment",
+"zh": [
+"投资"
+],
+"avoid": []
+},
+{
+"en": "accruals",
+"zh": [
+"应计",
+"应计项目"
+],
+"avoid": []
+},
+{
+"en": "long-short",
+"zh": [
+"多空"
+],
+"avoid": [
+"长短"
+]
+},
+{
+"en": "long-only",
+"zh": [
+"纯多头",
+"只做多"
+],
+"avoid": [
+"只长"
+]
+},
+{
+"en": "short selling",
+"zh": [
+"卖空",
+"做空"
+],
+"avoid": []
+},
+{
+"en": "leverage",
+"zh": [
+"杠杆"
+],
+"avoid": []
+},
+{
+"en": "rebalance",
+"zh": [
+"再平衡",
+"调仓"
+],
+"avoid": []
+},
+{
+"en": "rebalancing",
+"zh": [
+"再平衡",
+"调仓"
+],
+"avoid": []
+},
+{
+"en": "portfolio",
+"zh": [
+"组合",
+"投资组合"
+],
+"avoid": [
+"文件夹",
+"作品集"
+]
+},
+{
+"en": "benchmark",
+"zh": [
+"基准"
+],
+"avoid": [
+"标杆"
+]
+},
+{
+"en": "tracking error",
+"zh": [
+"跟踪误差"
+],
+"avoid": []
+},
+{
+"en": "risk model",
+"zh": [
+"风险模型"
+],
+"avoid": []
+},
+{
+"en": "covariance",
+"zh": [
+"协方差"
+],
+"avoid": []
+},
+{
+"en": "correlation",
+"zh": [
+"相关性",
+"相关系数"
+],
+"avoid": []
+},
+{
+"en": "decay",
+"zh": [
+"衰减"
+],
+"avoid": [
+"腐烂"
+]
+},
+{
+"en": "half-life",
+"zh": [
+"半衰期"
+],
+"avoid": []
+},
+{
+"en": "signal",
+"zh": [
+"信号"
+],
+"avoid": []
+},
+{
+"en": "operator",
+"zh": [
+"算子",
+"运算符"
+],
+"avoid": [
+"操作员",
+"接线员"
+]
+},
+{
+"en": "formulaic alpha",
+"zh": [
+"公式化因子",
+"公式化阿尔法"
+],
+"avoid": []
+},
+{
+"en": "genetic programming",
+"zh": [
+"遗传编程",
+"遗传规划"
+],
+"avoid": []
+},
+{
+"en": "search space",
+"zh": [
+"搜索空间"
+],
+"avoid": []
+},
+{
+"en": "graveyard",
+"zh": [
+"坟场",
+"墓地"
+],
+"avoid": []
+},
+{
+"en": "false discovery",
+"zh": [
+"虚假发现",
+"伪发现"
+],
+"avoid": []
+},
+{
+"en": "false discovery rate",
+"zh": [
+"错误发现率",
+"伪发现率"
+],
+"avoid": []
+},
+{
+"en": "deflated sharpe ratio",
+"zh": [
+"紧缩夏普比率",
+"缩减夏普比率"
+],
+"avoid": []
+},
+{
+"en": "t-statistic",
+"zh": [
+"t 统计量",
+"t统计量"
+],
+"avoid": []
+},
+{
+"en": "stationarity",
+"zh": [
+"平稳性"
+],
+"avoid": []
+},
+{
+"en": "meta-labeling",
+"zh": [
+"元标签"
+],
+"avoid": []
+},
+{
+"en": "triple barrier",
+"zh": [
+"三重障碍",
+"三重屏障"
+],
+"avoid": []
+},
+{
+"en": "sample weight",
+"zh": [
+"样本权重"
+],
+"avoid": []
+},
+{
+"en": "leakage",
+"zh": [
+"泄漏",
+"泄露"
+],
+"avoid": [
+"渗漏"
+]
+},
+{
+"en": "horizon",
+"zh": [
+"期限",
+"持有期",
+"预测期"
+],
+"avoid": [
+"地平线"
+]
+},
+{
+"en": "liquidity",
+"zh": [
+"流动性"
+],
+"avoid": [
+"液体"
+]
+},
+{
+"en": "market impact",
+"zh": [
+"市场冲击"
+],
+"avoid": [
+"市场影响力"
+]
+},
+{
+"en": "execution",
+"zh": [
+"执行",
+"交易执行"
+],
+"avoid": [
+"处决"
+]
+},
+{
+"en": "order book",
+"zh": [
+"订单簿"
+],
+"avoid": [
+"订单本"
+]
+},
+{
+"en": "regime",
+"zh": [
+"市场状态",
+"状态",
+"体制"
+],
+"avoid": [
+"政权"
+]
+},
+{
+"en": "tail risk",
+"zh": [
+"尾部风险"
+],
+"avoid": [
+"尾巴风险"
+]
+},
+{
+"en": "skewness",
+"zh": [
+"偏度"
+],
+"avoid": []
+},
+{
+"en": "kurtosis",
+"zh": [
+"峰度"
+],
+"avoid": []
+},
+{
+"en": "hedge",
+"zh": [
+"对冲"
+],
+"avoid": [
+"树篱"
+]
+},
+{
+"en": "hedge fund",
+"zh": [
+"对冲基金"
+],
+"avoid": []
+},
+{
+"en": "asset pricing",
+"zh": [
+"资产定价"
+],
+"avoid": []
+},
+{
+"en": "stochastic discount factor",
+"zh": [
+"随机贴现因子"
+],
+"avoid": []
+},
+{
+"en": "risk-free rate",
+"zh": [
+"无风险利率"
+],
+"avoid": []
+},
+{
+"en": "excess return",
+"zh": [
+"超额收益"
+],
+"avoid": [
+"过剩回报"
+]
+},
+{
+"en": "return",
+"zh": [
+"收益",
+"回报",
+"收益率"
+],
+"avoid": []
+},
+{
+"en": "yield",
+"zh": [
+"收益率"
+],
+"avoid": [
+"屈服"
+]
+},
+{
+"en": "carry",
+"zh": [
+"套息",
+"持有收益"
+],
+"avoid": [
+"携带"
+]
+},
+{
+"en": "earnings",
+"zh": [
+"盈利",
+"收益"
+],
+"avoid": []
+},
+{
+"en": "bootstrap",
+"zh": [
+"自助法",
+"自举"
+],
+"avoid": [
+"引导程序"
+]
+}
+]
+}

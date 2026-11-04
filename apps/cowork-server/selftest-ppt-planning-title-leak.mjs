@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {normalizePaste} from './lib/ppt-source.mjs';
+import {inspectOutlineTopicLanguages,planningMetadataTitleLeak} from './lib/ppt-topic-title-validation.mjs';
+import {outlineMetadataRepairPrompt,applyOutlineMetadataRepair} from './lib/ppt-outline-protocol.mjs';
+const source=normalizePaste('# 课程试点与学习评估\n\n## 案例顺序与双语材料\n每次只改变一个关键条件。中文作为讲解主要语言，英文保留术语和补充案例。');
+const p={source,generationPolicy:{knowledge:'source_only',language:{mode:'source',body:'both'}}},s={id:'course',title:'每次只改变一个关键条件、翻译对是一项主张的两个显示成本',sourceUnitIds:[source.semantic.inventory.items.at(-1).id],planningProtocolVersion:2};
+const original=JSON.stringify(source),raw={version:2,slides:[s]},issues=inspectOutlineTopicLanguages(p,raw.slides);assert.equal(issues.length,1);assert.equal(issues[0].reason,'planning_metadata_leak');
+const prompt=outlineMetadataRepairPrompt(p,raw,{details:{metadataConflicts:issues}});assert.match(prompt,/planning_metadata_leak/);assert.match(prompt,/source_owned_page_context/);
+const next=applyOutlineMetadataRepair(raw,{details:{metadataConflicts:issues}},{version:2,updates:[{pageIndex:0,field:'title',text:'案例顺序与双语材料'}]});assert.deepEqual(inspectOutlineTopicLanguages(p,next.slides),[]);assert.deepEqual(next.slides[0].sourceUnitIds,s.sourceUnitIds);assert.equal(JSON.stringify(source),original);
+assert.equal(planningMetadataTitleLeak(p,'Translation pairs are one claim with two display costs.'),'Translation pairs are one claim with two display costs');
+assert.equal(planningMetadataTitleLeak(p,'显示成本与版式设计'),null,'ordinary topic vocabulary alone is not a forbidden phrase');
+assert.equal(planningMetadataTitleLeak({...p,source:{text:'The actual presentation design source explains display costs.'}},s.title),null,'real source discussion of rendering costs remains legitimate, including translated labels');
+assert.equal(planningMetadataTitleLeak({...p,source:{text:'projected_display_visual_units is a documented source field.'}},'projected_display_visual_units'),null);
+for(const protectedProject of [{...p,confirmedOutline:{hash:'frozen'}},{...p,requestedOutline:raw}])assert.deepEqual(inspectOutlineTopicLanguages(protectedProject,raw.slides),[]);
+assert.deepEqual(inspectOutlineTopicLanguages(p,[{...s,titleLocked:true}]),[],'manual titles are not silently rewritten');
+console.log('Internal allocation assertion rejected before confirmation; scoped metadata repair, literal source, ordinary vocabulary and protected-title negatives passed.');

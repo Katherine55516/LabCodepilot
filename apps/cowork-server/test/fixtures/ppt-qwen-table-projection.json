@@ -1,0 +1,67 @@
+{
+  "origin": "actual qwen3.8-max table projection 2026-10-20; missing one selected row",
+  "item": {
+    "id": "b_0016",
+    "type": "TableBlock",
+    "rows": [
+      [
+        "Term",
+        "Definition",
+        "Example"
+      ],
+      [
+        "**Characteristic 特征**",
+        "A firm-level observable at time $t$ (accounting ratio, price statistic, sentiment score) 公司层面在时刻 $t$ 可观察到的量（会计比率、价格统计量、情绪评分）",
+        "Book-to-market ratio $B/M_{i,t}$ 账面市值比 $B/M_{i,t}$"
+      ],
+      [
+        "**Factor 因子**",
+        "A return series (usually long-short) built by sorting stocks on a characteristic, or a statistical factor from PCA/regression 依据某特征对股票排序构建出的收益率序列（通常为多空组合），或由 PCA/回归得到的统计因子",
+        "HML: high $B/M$ minus low $B/M$ portfolio return HML：高 $B/M$ 减低 $B/M$ 组合收益"
+      ],
+      [
+        "**Signal / Alpha 信号/阿尔法**",
+        "A cross-sectional score used to rank stocks for portfolio construction, may or may not correspond to a known academic factor 用于给股票排序以构建组合的横截面评分，可能对应也可能不对应某个已知的学术因子",
+        "A proprietary blend of 40 characteristics, output as a single number per stock per day 由 40 个特征专有混合而成，每只股票每天输出一个数值"
+      ],
+      [
+        "**Anomaly 异象**",
+        "An empirical pattern in average returns that a benchmark asset pricing model (usually CAPM or FF3) fails to explain — i.e., a factor is \"anomalous\" relative to *some* model, not in absolute terms 某个基准资产定价模型（通常是 CAPM 或 FF3）无法解释的平均收益率经验模式——即因子相对于*某个*模型而言是\"异常\"的，而非绝对意义上的异常",
+        "Momentum was an anomaly relative to CAPM/FF3; it is not anomalous relative to Carhart's own 4-factor model (by construction) 动量相对于 CAPM/FF3 是异象；但相对于 Carhart 自己的四因子模型（按构造）就不是异象"
+      ],
+      [
+        "**Alpha ($\\alpha$) 阿尔法**",
+        "The intercept in a factor-model regression — return unexplained by the chosen factors 因子模型回归中的截距项——所选因子无法解释的收益部分",
+        "$\\alpha_i$ in $r_i - r_f = \\alpha_i + \\beta_i^\\top f + \\epsilon_i$"
+      ]
+    ]
+  },
+  "entry": {
+    "sourceUnitId": "b_0016",
+    "destination": "summary",
+    "reason": "Core term distinctions table",
+    "primaryPageIndex": 3,
+    "rowIndices": [
+      1,
+      4,
+      5
+    ],
+    "summaryRows": [
+      [
+        "Term",
+        "Definition",
+        "Example"
+      ],
+      [
+        "Anomaly 异象",
+        "An empirical pattern in average returns that a benchmark model fails to explain — model-relative, not absolute 基准模型无法解释的平均收益经验模式——相对模型而言",
+        "Momentum was anomalous relative to CAPM/FF3; not relative to Carhart4 动量相对于CAPM/FF3是异象；相对于Carhart4不是"
+      ],
+      [
+        "Alpha (α) 阿尔法",
+        "The intercept in a factor-model regression — return unexplained by chosen factors 因子模型回归截距项",
+        "α_i in r_i - r_f = α_i + β_i^T f + ε_i"
+      ]
+    ]
+  }
+}

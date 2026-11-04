@@ -1,0 +1,728 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from '@/hooks/useTranslation';
+import {
+  MessageResponse,
+} from '@/components/ai-elements/message';
+import {
+  Confirmation,
+  ConfirmationTitle,
+  ConfirmationRequest,
+  ConfirmationAccepted,
+  ConfirmationRejected,
+  ConfirmationActions,
+  ConfirmationAction,
+} from '@/components/ai-elements/confirmation';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { CaretDown, CaretLeft, X } from '@phosphor-icons/react';
+import { cn } from '@/lib/utils';
+import type { ToolUIPart } from 'ai';
+import type { PermissionRequestEvent } from '@/types';
+
+interface ToolUseInfo {
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+interface PermissionPromptProps {
+  pendingPermission: PermissionRequestEvent | null;
+  permissionResolved: 'allow' | 'deny' | null;
+  onPermissionResponse: (decision: 'allow' | 'allow_session' | 'deny', updatedInput?: Record<string, unknown>, denyMessage?: string) => void;
+  toolUses?: ToolUseInfo[];
+  permissionProfile?: 'default' | 'full_access';
+}
+
+/** Max lines to show in the tool input area before collapsing */
+const MAX_INPUT_LINES = 8;
+const MAX_INPUT_CHARS = 500;
+
+/** Bottom permission panel resize bounds: min drag height (px) and max as a
+ *  fraction of the viewport height. */
+const MIN_PANEL_HEIGHT = 120;
+const MAX_PANEL_HEIGHT_RATIO = 0.85;
+
+function AskUserQuestionUI({
+  toolInput,
+  onSubmit,
+  collapsed,
+  onToggleCollapse,
+  onClose,
+}: {
+  toolInput: Record<string, unknown>;
+  onSubmit: (decision: 'allow', updatedInput: Record<string, unknown>) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const questions = (toolInput.questions || []) as Array<{
+    question: string;
+    options: Array<{ label: string; description?: string }>;
+    multiSelect: boolean;
+    header?: string;
+  }>;
+
+  // One question per screen (Claude-desktop style). `current` is the page index;
+  // selections / otherTexts / useOther are keyed by question index so answers
+  // persist when paging back and forth.
+  const [current, setCurrent] = useState(0);
+  const [selections, setSelections] = useState<Record<number, Set<string>>>({});
+  const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+  const [useOther, setUseOther] = useState<Record<number, boolean>>({});
+
+  const total = questions.length;
+  const q = questions[current];
+  const isLast = current >= total - 1;
+  const isMulti = !!q?.multiSelect;
+
+  const selectOption = (label: string) => {
+    setSelections((prev) => {
+      const cur = new Set(prev[current] || []);
+      if (isMulti) {
+        if (cur.has(label)) cur.delete(label); else cur.add(label);
+      } else {
+        cur.clear();
+        cur.add(label);
+      }
+      return { ...prev, [current]: cur };
+    });
+    setUseOther((prev) => ({ ...prev, [current]: false }));
+  };
+
+  const selectOther = () => {
+    if (!isMulti) setSelections((prev) => ({ ...prev, [current]: new Set() }));
+    setUseOther((prev) => ({ ...prev, [current]: !prev[current] }));
+  };
+
+  // Collect answers from EVERY question (not just the current page). Unanswered
+  // questions are omitted so the model can tell what the user actually chose.
+  const submitAll = () => {
+    const answers: Record<string, string> = {};
+    questions.forEach((qq, i) => {
+      const sel = Array.from(selections[i] || []);
+      if (useOther[i] && otherTexts[i]?.trim()) sel.push(otherTexts[i].trim());
+      if (sel.length > 0) answers[qq.question] = sel.join(', ');
+    });
+    onSubmit('allow', { questions: toolInput.questions, answers });
+  };
+
+  const curAnswered =
+    (selections[current]?.size || 0) > 0 ||
+    (!!useOther[current] && !!otherTexts[current]?.trim());
+
+  // Skip and Next/Submit both advance; the only difference is that Next/Submit
+  // is disabled on the last page until it's answered, while Skip always works.
+  const goNext = () => {
+    if (isLast) submitAll();
+    else setCurrent((c) => Math.min(total - 1, c + 1));
+  };
+  const goPrev = () => setCurrent((c) => Math.max(0, c - 1));
+
+  // Keyboard: 1..N pick the matching option, N+1 toggles Other, Enter advances.
+  // Digits are ignored while typing in the Other box so the field works normally.
+  useEffect(() => {
+    if (collapsed || !q) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (e.key === 'Enter' && !typing) {
+        if (!isLast || curAnswered) { e.preventDefault(); goNext(); }
+        return;
+      }
+      if (typing) return;
+      const n = parseInt(e.key, 10);
+      if (Number.isNaN(n)) return;
+      if (n >= 1 && n <= q.options.length) { e.preventDefault(); selectOption(q.options[n - 1].label); }
+      else if (n === q.options.length + 1) { e.preventDefault(); selectOther(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed, current, q, curAnswered, isLast]);
+
+  if (!q) return null;
+
+  const header = (
+    <div className="flex items-center gap-2 px-4 pt-3 pb-2 shrink-0">
+      {total > 1 ? (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {current + 1}/{total}
+        </span>
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-primary/70" />
+      )}
+      <span className="flex-1 truncate text-sm font-semibold">{q.question}</span>
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={t('permissionPrompt.collapse')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <CaretDown size={16} className={cn('transition-transform', collapsed && 'rotate-180')} />
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t('permissionPrompt.close')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+
+  if (collapsed) return <div className="flex flex-col">{header}</div>;
+
+  const selected = selections[current] || new Set<string>();
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {header}
+
+      {/* Options — vertical rows: label + description + number badge */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4">
+        <div className="space-y-1.5 py-1">
+          {q.options.map((opt, i) => {
+            const isSel = selected.has(opt.label);
+            return (
+              <button
+                type="button"
+                key={opt.label}
+                onClick={() => selectOption(opt.label)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+                  isSel ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className={cn('text-sm font-medium', isSel ? 'text-primary' : 'text-foreground')}>
+                    {opt.label}
+                  </div>
+                  {opt.description && (
+                    <div className="mt-0.5 break-words text-xs text-muted-foreground">{opt.description}</div>
+                  )}
+                </div>
+                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Other — free-text answer */}
+          <button
+            type="button"
+            onClick={selectOther}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+              useOther[current] ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
+            )}
+          >
+            <div className={cn('flex-1 text-sm font-medium', useOther[current] ? 'text-primary' : 'text-foreground')}>
+              {t('permissionPrompt.other')}
+            </div>
+            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+              {q.options.length + 1}
+            </span>
+          </button>
+          {useOther[current] && (
+            <Input
+              type="text"
+              placeholder={t('permissionPrompt.otherPlaceholder')}
+              value={otherTexts[current] || ''}
+              onChange={(e) => setOtherTexts((prev) => ({ ...prev, [current]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && curAnswered) { e.preventDefault(); goNext(); }
+              }}
+              className="text-sm"
+              autoFocus
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Footer — Back (paging) on the left, Skip + Next/Submit on the right */}
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-2.5 shrink-0">
+        {current > 0 && (
+          <button
+            type="button"
+            onClick={goPrev}
+            aria-label={t('permissionPrompt.back')}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <CaretLeft size={16} />
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={goNext} className="text-xs">
+            {t('permissionPrompt.skip')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={goNext}
+            disabled={isLast && !curAnswered}
+            className="gap-1.5 text-xs"
+          >
+            {isLast ? t('permissionPrompt.submit') : t('permissionPrompt.next')}
+            <span className="text-[11px] opacity-70">↵</span>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function extractPlanFilePath(toolUses: ToolUseInfo[]): string | null {
+  for (let i = toolUses.length - 1; i >= 0; i--) {
+    const tool = toolUses[i];
+    const input = tool.input as Record<string, unknown>;
+    if ((tool.name === 'Write' || tool.name === 'Edit') && typeof input.file_path === 'string') {
+      const fp = input.file_path;
+      if (fp.endsWith('.md') && (fp.includes('plans/') || fp.includes('plans\\'))) {
+        return fp;
+      }
+    }
+  }
+  return null;
+}
+
+function ExitPlanModeUI({
+  toolInput,
+  toolUses,
+  onApprove,
+  onDeny,
+  onDenyWithMessage,
+}: {
+  toolInput: Record<string, unknown>;
+  toolUses: ToolUseInfo[];
+  onApprove: () => void;
+  onDeny: () => void;
+  onDenyWithMessage: (message: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planContent, setPlanContent] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const planFilePath = extractPlanFilePath(toolUses);
+  const allowedPrompts = (toolInput.allowedPrompts || []) as Array<{
+    tool: string;
+    prompt: string;
+  }>;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+      <div className="flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span className="text-sm font-medium">{t('permissionPrompt.planReady')}</span>
+      </div>
+      {allowedPrompts.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">{t('permissionPrompt.requestedPermissions')}</p>
+          <ul className="space-y-0.5">
+            {allowedPrompts.map((p, i) => (
+              <li key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{p.tool}</span>
+                <span>{p.prompt}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onDeny}
+          className="text-xs"
+        >
+          {t('permissionPrompt.reject')}
+        </Button>
+        {planFilePath && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setPlanLoading(true);
+              try {
+                const res = await fetch(`/api/files/preview?path=${encodeURIComponent(planFilePath)}&maxLines=1000`);
+                if (res.ok) {
+                  const data = await res.json();
+                  setPlanContent(data.preview?.content || t('permissionPrompt.planLoadFailed'));
+                } else {
+                  setPlanContent(t('permissionPrompt.planLoadFailed'));
+                }
+              } catch {
+                setPlanContent(t('permissionPrompt.planLoadFailed'));
+              }
+              setPlanLoading(false);
+              setPlanOpen(true);
+            }}
+            disabled={planLoading}
+            className="border-primary/30 text-xs text-primary hover:bg-primary/10"
+          >
+            {planLoading ? t('permissionPrompt.loadingPlan') : t('permissionPrompt.viewPlan')}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          onClick={onApprove}
+          className="text-xs"
+        >
+          {t('permissionPrompt.approveExecute')}
+        </Button>
+      </div>
+      <div className="flex gap-2">
+        <Input
+          type="text"
+          placeholder={t('permissionPrompt.feedbackPlaceholder')}
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && feedback.trim()) {
+              onDenyWithMessage(feedback.trim());
+            }
+          }}
+          className="flex-1 text-xs"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (feedback.trim()) onDenyWithMessage(feedback.trim());
+          }}
+          disabled={!feedback.trim()}
+          className="text-xs"
+        >
+          {t('permissionPrompt.doThisInstead')}
+        </Button>
+      </div>
+
+      {planOpen && planContent && (
+        <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+          <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>{t('permissionPrompt.planTitle')}</DialogTitle>
+            </DialogHeader>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <MessageResponse>{planContent}</MessageResponse>
+            </div>
+            <DialogFooter showCloseButton />
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Collapsible tool input display with truncation for long content.
+ */
+function ToolInputDisplay({ input }: { input: Record<string, unknown> }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  const formatToolInput = (inp: Record<string, unknown>): string => {
+    // For Bash, show command prominently
+    if (inp.command) {
+      const cmd = String(inp.command);
+      // If there are other keys besides command/description, show full JSON
+      const extraKeys = Object.keys(inp).filter(k => k !== 'command' && k !== 'description');
+      if (extraKeys.length > 0) {
+        return JSON.stringify(inp, null, 2);
+      }
+      return cmd;
+    }
+    // For Write/Edit, show the full input so content/old_string/new_string are visible
+    if (inp.file_path) {
+      const keys = Object.keys(inp);
+      if (keys.length === 1) return String(inp.file_path);
+      return JSON.stringify(inp, null, 2);
+    }
+    if (inp.path) {
+      const keys = Object.keys(inp);
+      if (keys.length === 1) return String(inp.path);
+      return JSON.stringify(inp, null, 2);
+    }
+    return JSON.stringify(inp, null, 2);
+  };
+
+  const formatted = formatToolInput(input);
+  const lineCount = formatted.split('\n').length;
+  const isTruncated = lineCount > MAX_INPUT_LINES || formatted.length > MAX_INPUT_CHARS;
+
+  const displayText = !expanded && isTruncated
+    ? formatted.slice(0, MAX_INPUT_CHARS).split('\n').slice(0, MAX_INPUT_LINES).join('\n') + '\n…'
+    : formatted;
+
+  return (
+    <div className="mt-1 overflow-hidden rounded bg-muted/50">
+      <pre className={cn(
+        "overflow-x-auto whitespace-pre-wrap break-all px-3 py-2 font-mono text-xs",
+        !expanded && "max-h-[10rem]"
+      )}>
+        {displayText}
+      </pre>
+      {isTruncated && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="w-full border-t border-border/30 px-3 py-1 text-[10px] text-muted-foreground hover:bg-muted/80 transition-colors"
+        >
+          {expanded ? `▲ ${t('permissionPrompt.collapse')}` : `▼ ${t('permissionPrompt.showMore')}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function PermissionPrompt({
+  pendingPermission,
+  permissionResolved,
+  onPermissionResponse,
+  toolUses = [],
+  permissionProfile,
+}: PermissionPromptProps) {
+  const { t } = useTranslation();
+
+  // Drag-to-resize for the bottom panel. `panelHeight === null` means auto
+  // (content height, capped at 50vh). Dragging the top edge switches to an
+  // explicit pixel height (capped at 85vh) so a long question list can be
+  // enlarged to read in full, or shrunk to free the conversation above it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  // AskUserQuestion can collapse to just its header (caret in the panel header).
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+
+  // A new permission request resets height + collapse, so state dragged/toggled
+  // for the previous prompt doesn't carry over to an unrelated one. Reset during
+  // render (React's "adjust state when a prop changes" pattern) rather than in an
+  // effect — a synchronous setState in an effect trips react-hooks/set-state-in-effect
+  // and adds an extra commit + re-render round-trip.
+  const [prevReqId, setPrevReqId] = useState(pendingPermission?.permissionRequestId);
+  if (prevReqId !== pendingPermission?.permissionRequestId) {
+    setPrevReqId(pendingPermission?.permissionRequestId);
+    setPanelHeight(null);
+    setPanelCollapsed(false);
+  }
+
+  const handleResizeDown = (e: React.PointerEvent) => {
+    const el = panelRef.current;
+    if (!el) return;
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: el.getBoundingClientRect().height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const handleResizeMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    // Handle sits on top of a bottom-anchored panel: dragging up (smaller
+    // clientY) grows it, dragging down shrinks it.
+    const delta = dragRef.current.startY - e.clientY;
+    const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+    const next = Math.min(maxH, Math.max(MIN_PANEL_HEIGHT, dragRef.current.startH + delta));
+    setPanelHeight(next);
+  };
+
+  const handleResizeUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
+
+  // Tools that require user interaction even in full_access mode.
+  // AskUserQuestion's entire purpose is to get user input — auto-approving
+  // would return empty answers, defeating the purpose.
+  const NEVER_AUTO_APPROVE = new Set(['AskUserQuestion']);
+
+  // Auto-approve when full_access is active — except for interactive tools
+  const autoApprovedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      permissionProfile === 'full_access' &&
+      pendingPermission &&
+      !permissionResolved &&
+      autoApprovedRef.current !== pendingPermission.permissionRequestId &&
+      !NEVER_AUTO_APPROVE.has(pendingPermission.toolName)
+    ) {
+      autoApprovedRef.current = pendingPermission.permissionRequestId;
+      onPermissionResponse('allow');
+    }
+  }, [permissionProfile, pendingPermission, permissionResolved, onPermissionResponse]);
+
+  // Don't render permission UI when full_access — EXCEPT for interactive tools
+  if (
+    permissionProfile === 'full_access' &&
+    (!pendingPermission || !NEVER_AUTO_APPROVE.has(pendingPermission.toolName))
+  ) {
+    return null;
+  }
+
+  // Nothing to show
+  if (!pendingPermission && !permissionResolved) return null;
+
+  // Only show the resolved status text (not the full UI) when already resolved.
+  // This prevents stacking — once resolved, we show a minimal status line that
+  // auto-hides quickly (the stream-session-manager clears it after 1s).
+  const isResolved = !!permissionResolved;
+
+  const getConfirmationState = (): ToolUIPart['state'] => {
+    if (permissionResolved) return 'approval-responded';
+    if (pendingPermission) return 'approval-requested';
+    return 'input-available';
+  };
+
+  const getApproval = () => {
+    if (!pendingPermission && !permissionResolved) return undefined;
+    if (permissionResolved === 'allow') {
+      return { id: pendingPermission?.permissionRequestId || '', approved: true as const };
+    }
+    if (permissionResolved === 'deny') {
+      return { id: pendingPermission?.permissionRequestId || '', approved: false as const };
+    }
+    return { id: pendingPermission?.permissionRequestId || '' };
+  };
+
+  const isAskQuestion = pendingPermission?.toolName === 'AskUserQuestion' && !isResolved;
+  const askCollapsed = isAskQuestion && panelCollapsed;
+  const showResizeHandle = !!pendingPermission && !isResolved && !askCollapsed;
+
+  return (
+    <div
+      ref={panelRef}
+      className="relative mx-auto flex w-full max-w-3xl flex-col overflow-hidden border-t border-border bg-background"
+      style={askCollapsed
+        ? { maxHeight: 'none' }
+        : panelHeight != null && showResizeHandle
+          ? { height: panelHeight, maxHeight: `${MAX_PANEL_HEIGHT_RATIO * 100}vh` }
+          : { maxHeight: '50vh' }}
+    >
+      {showResizeHandle && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title={t('permissionPrompt.resizeHint')}
+          aria-label={t('permissionPrompt.resizeHint')}
+          onPointerDown={handleResizeDown}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeUp}
+          className="group flex h-3 shrink-0 cursor-ns-resize touch-none items-center justify-center"
+        >
+          <div className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
+        </div>
+      )}
+      <div className={isAskQuestion ? 'flex min-h-0 flex-1 flex-col' : 'flex-1 overflow-y-auto px-4 pb-3 pt-1'}>
+      {/* ExitPlanMode */}
+      {pendingPermission?.toolName === 'ExitPlanMode' && !isResolved && (
+        <ExitPlanModeUI
+          toolInput={pendingPermission.toolInput as Record<string, unknown>}
+          toolUses={toolUses}
+          onApprove={() => onPermissionResponse('allow')}
+          onDeny={() => onPermissionResponse('deny')}
+          onDenyWithMessage={(msg) => onPermissionResponse('deny', undefined, msg)}
+        />
+      )}
+      {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'allow' && (
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.planApproved')}</p>
+      )}
+      {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'deny' && (
+        <p className="py-1 text-xs text-status-error-foreground">{t('permissionPrompt.planRejected')}</p>
+      )}
+
+      {/* AskUserQuestion */}
+      {pendingPermission?.toolName === 'AskUserQuestion' && !isResolved && (
+        <AskUserQuestionUI
+          toolInput={pendingPermission.toolInput as Record<string, unknown>}
+          onSubmit={(decision, updatedInput) => onPermissionResponse(decision, updatedInput)}
+          collapsed={panelCollapsed}
+          onToggleCollapse={() => setPanelCollapsed((c) => !c)}
+          onClose={() => onPermissionResponse('allow', {
+            questions: (pendingPermission.toolInput as Record<string, unknown>).questions,
+            answers: {},
+          })}
+        />
+      )}
+      {pendingPermission?.toolName === 'AskUserQuestion' && isResolved && (
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.answerSubmitted')}</p>
+      )}
+
+      {/* Generic confirmation for other tools — only show when not yet resolved */}
+      {pendingPermission?.toolName !== 'AskUserQuestion' && pendingPermission?.toolName !== 'ExitPlanMode' && pendingPermission && !isResolved && (
+        <Confirmation
+          approval={getApproval()}
+          state={getConfirmationState()}
+        >
+          <ConfirmationTitle>
+            <span className="font-medium">{pendingPermission.toolName}</span>
+            {pendingPermission.decisionReason && (
+              <span className="text-muted-foreground ml-2">
+                — {pendingPermission.decisionReason}
+              </span>
+            )}
+          </ConfirmationTitle>
+
+          <ToolInputDisplay input={pendingPermission.toolInput} />
+
+          <ConfirmationRequest>
+            <ConfirmationActions>
+              <ConfirmationAction
+                variant="outline"
+                onClick={() => onPermissionResponse('deny')}
+              >
+                {t('permissionPrompt.deny')}
+              </ConfirmationAction>
+              <ConfirmationAction
+                variant="outline"
+                onClick={() => onPermissionResponse('allow')}
+              >
+                {t('permissionPrompt.allowOnce')}
+              </ConfirmationAction>
+              {pendingPermission.suggestions && pendingPermission.suggestions.length > 0 && (
+                <ConfirmationAction
+                  variant="default"
+                  onClick={() => onPermissionResponse('allow_session')}
+                >
+                  {t('streaming.allowForSession')}
+                </ConfirmationAction>
+              )}
+            </ConfirmationActions>
+          </ConfirmationRequest>
+
+          <ConfirmationAccepted>
+            <p className="text-xs text-status-success-foreground">{t('streaming.allowed')}</p>
+          </ConfirmationAccepted>
+
+          <ConfirmationRejected>
+            <p className="text-xs text-status-error-foreground">{t('streaming.denied')}</p>
+          </ConfirmationRejected>
+        </Confirmation>
+      )}
+
+      {/* Resolved status for generic tools — minimal one-liner */}
+      {pendingPermission?.toolName !== 'AskUserQuestion' && pendingPermission?.toolName !== 'ExitPlanMode' && isResolved && (
+        <p className={cn(
+          "py-1 text-xs",
+          permissionResolved === 'allow' ? 'text-status-success-foreground' : 'text-status-error-foreground'
+        )}>
+          {permissionResolved === 'allow' ? t('streaming.allowed') : t('streaming.denied')}
+        </p>
+      )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import {normalizePaste} from './lib/ppt-source.mjs';
+import {ensureOutlineClosing,isDedicatedClosing,deterministicClosingDraft,closingTemplateOmissions} from './lib/ppt-closing-page.mjs';
+import {_internals as api} from './lib/ppt-api.mjs';
+const source=normalizePaste('# Pilot readiness\n\nThe pilot covers 12 test accounts. One owner approves access.\n\n## Recovery\nObserve accounts for 7 days. Keep the retry limit at 3. Pause expansion when acceptance fails.');
+const items=source.semantic.inventory.items.filter(i=>i.type!=='HeadingBlock');
+const p={pages:3,template:'violet',inputKind:'paste',source,pageDecision:{source:'user',mode:'explicit'},generationPolicy:{content:'full_source',details:'slides',knowledge:'source_only',language:{mode:'source'}}};
+const raw={version:2,slides:[{title:'Pilot readiness',role:'cover',sourceUnitIds:[]},{title:'Acceptance and recovery',role:'mechanism',sourceUnitIds:items.map(i=>i.id),focus:'Retain the complete source.'},{title:'Conclusion',role:'closing',sourceUnitIds:[],focus:'Repeat 12 accounts, 7 days and 3 retries.'}]};
+const before=JSON.stringify(source),closed=ensureOutlineClosing(p,structuredClone(raw));assert.equal(closed.slides.length,3);assert.equal(closed.slides.at(-1).title,'Thanks for watching!');assert.ok(isDedicatedClosing(closed.slides.at(-1)));assert.ok(!/12|7|3/.test(closed.slides.at(-1).focus));assert.deepEqual(closed.slides[1].sourceUnitIds,items.map(i=>i.id));assert.deepEqual(deterministicClosingDraft(p,closed.slides.at(-1),2).sourceCommentary,[]);
+const assessed=api.assessOutlineCandidate(p,structuredClone(raw));assert.equal(assessed.outline.length,3);assert.equal(assessed.outline.at(-1).title,'Thanks for watching!');assert.deepEqual(assessed.outline[1].sourceUnitIds,items.map(i=>i.id));assert.equal(JSON.stringify(source),before);
+for(const patch of [{requestedOutline:[{title:'User closing'}]},{update:{baseId:'earlier'}},{source:{text:'An open prompt.'}}])assert.deepEqual(ensureOutlineClosing({...p,...patch},structuredClone(raw)),raw);
+const owned=structuredClone(raw);owned.slides[2].sourceUnitIds=[items.at(-1).id];assert.deepEqual(ensureOutlineClosing(p,structuredClone(owned)),owned,'a substantive final source page keeps its topic and facts');
+const locked=structuredClone(raw);locked.slides[2].titleLocked=true;assert.deepEqual(ensureOutlineClosing(p,structuredClone(locked)),locked,'a manually locked closing topic is not rewritten');
+console.log('Explicit page counts normalize only unowned source closing placeholders before confirmation; source, owned last pages, updates, open prompts and manual locks preserved.');
+// A report's ordinal/header bar is a content carrier, not closing artwork.
+const carrier={id:'bar',type:'shape',locked:true,nativeRef:{shapeId:4,autoShapeType:'ROUNDED_RECTANGLE (5)'},geometry:{x:100,y:200,width:1000,height:100},content:{templateDesignOnly:true}};
+const ordinal={id:'number',type:'text',nativeRef:{shapeId:5},geometry:{x:500,y:210,width:50,height:50},content:{text:'1',templateDesignOnly:true}};
+const body=[6,7].map((id,i)=>({id:'body'+id,type:'text',nativeRef:{shapeId:id},geometry:{x:110,y:320+i*70,width:950,height:50},content:{text:'Old report copy'}}));
+const closing={id:'closing',title:'Thanks for watching!',sourceUnitIds:[],nodes:[carrier,ordinal,...body],templateOmissions:body.map(n=>({shapeId:n.nativeRef.shapeId,reason:'Dedicated closing omits old report content.'}))};
+const nativeClosing={templateContentMode:'design_only',outline:[closing],templateFidelity:{slides:[{nodes:[carrier,ordinal,...body,{id:'artwork',type:'image',nativeRef:{shapeId:9},geometry:{x:0,y:0,width:1200,height:100}}],slots:body.map(n=>({shapeId:n.nativeRef.shapeId,role:'content'}))}]}};
+assert.deepEqual(closingTemplateOmissions(nativeClosing,closing,0).map(r=>r.shapeId),[4,5]);
+assert.deepEqual(closingTemplateOmissions({...nativeClosing,runtime:{slides:{closing:{accepted:true}}}},closing,0,{validate:true}).map(r=>r.shapeId),[4,5],'publication can revalidate the same classified disposition without authorizing a new mutation');
+assert.equal(closingTemplateOmissions(nativeClosing,{...closing,templateOmissions:closing.templateOmissions.slice(0,1)},0).length,0,'a retained body member keeps its whole carrier');
+for(const patch of [{templateFixedObjectIds:['bar']},{templateFixedObjectIds:['number']},{runtime:{slides:{closing:{accepted:true}}}},{outline:[{...closing,sourceUnitIds:['source-object']}]},{templateContentMode:'keep_all'}])assert.deepEqual(closingTemplateOmissions({...nativeClosing,...patch},closing,0),[]);
+assert.deepEqual(closingTemplateOmissions(nativeClosing,{...closing,nodes:closing.nodes.map(n=>n.id==='number'?{...n,locked:true}:n)},0),[],'a user lock on the ordinal protects the carrier');
+assert.deepEqual(closingTemplateOmissions(nativeClosing,{...closing,nodes:closing.nodes.map(n=>n.id==='bar'?{...n,userStyle:true}:n)},0),[],'user styling protects native carrier');
+console.log('Empty closing carriers retire as complete components; artwork, retained content, fixed objects, user edits and accepted pages are preserved.');

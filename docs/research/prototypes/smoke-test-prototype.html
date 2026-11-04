@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冒烟测试 · 交互原型 v2</title>
+</head>
+<body>
+<style>
+  :root {
+    --bg: oklch(0.99 0.002 106);
+    --fg: oklch(0.147 0.004 49.25);
+    --card: oklch(1 0 0);
+    --muted: oklch(0.962 0.002 106);
+    --muted-fg: oklch(0.553 0.013 58.071);
+    --border: oklch(0.923 0.003 48.717);
+    --primary: oklch(0.546 0.245 262.881);
+    --primary-fg: oklch(0.985 0.001 106.423);
+    --ok: oklch(0.577 0.17 149);
+    --warn: oklch(0.65 0.19 47.6);
+    --err: oklch(0.577 0.215 27.3);
+    --smoke: oklch(0.62 0.16 65);           /* 冒烟主题色：琥珀 */
+    --smoke-bg: oklch(0.62 0.16 65 / 0.12);
+    --shadow: 0 10px 40px oklch(0 0 0 / 0.18);
+    --sans: ui-sans-serif, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: oklch(0.147 0.004 49.25);
+      --fg: oklch(0.985 0.001 106.423);
+      --card: oklch(0.196 0.005 52);
+      --muted: oklch(0.245 0.006 50);
+      --muted-fg: oklch(0.709 0.01 56.259);
+      --border: oklch(1 0 0 / 0.11);
+      --ok: oklch(0.72 0.17 149);
+      --warn: oklch(0.75 0.17 55);
+      --err: oklch(0.66 0.2 25);
+      --smoke: oklch(0.75 0.15 70);
+      --smoke-bg: oklch(0.75 0.15 70 / 0.14);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(0.147 0.004 49.25); --fg: oklch(0.985 0.001 106.423);
+    --card: oklch(0.196 0.005 52); --muted: oklch(0.245 0.006 50);
+    --muted-fg: oklch(0.709 0.01 56.259); --border: oklch(1 0 0 / 0.11);
+    --ok: oklch(0.72 0.17 149); --warn: oklch(0.75 0.17 55); --err: oklch(0.66 0.2 25);
+    --smoke: oklch(0.75 0.15 70); --smoke-bg: oklch(0.75 0.15 70 / 0.14);
+  }
+  :root[data-theme="light"] {
+    --bg: oklch(0.99 0.002 106); --fg: oklch(0.147 0.004 49.25);
+    --card: oklch(1 0 0); --muted: oklch(0.962 0.002 106);
+    --muted-fg: oklch(0.553 0.013 58.071); --border: oklch(0.923 0.003 48.717);
+    --ok: oklch(0.577 0.17 149); --warn: oklch(0.65 0.19 47.6); --err: oklch(0.577 0.215 27.3);
+    --smoke: oklch(0.62 0.16 65); --smoke-bg: oklch(0.62 0.16 65 / 0.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px; line-height: 1.6; }
+  button { font-family: inherit; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  header.top h1 { font-size: 22px; font-weight: 700; letter-spacing: .01em; }
+  .subtitle { color: var(--muted-fg); font-size: 13px; margin-bottom: 8px; }
+  .subtitle code, td code { font-family: var(--mono); font-size: 12px; background: var(--muted); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .decisions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; font-size: 12px; }
+  .decisions span { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; color: var(--muted-fg); }
+  .decisions span b { color: var(--fg); font-weight: 600; }
+  .decisions span.open { border-color: var(--warn); color: var(--warn); }
+
+  /* 流程步骤 tabs */
+  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  .steps button {
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    border-radius: 999px; padding: 7px 16px; font-size: 13px; display: flex; align-items: center; gap: 8px;
+    transition: border-color .15s, background .15s;
+  }
+  .steps button .n {
+    width: 18px; height: 18px; border-radius: 50%; background: var(--muted); color: var(--muted-fg);
+    font-size: 11px; display: inline-flex; align-items: center; justify-content: center; font-weight: 600;
+  }
+  .steps button.active { border-color: var(--smoke); background: var(--smoke-bg); }
+  .steps button.active .n { background: var(--smoke); color: #fff; }
+
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  .stage { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 26px; }
+  .stage + .note, .modal + .note, .tblwrap + .note { margin-top: 14px; }
+  .note { color: var(--muted-fg); font-size: 13px; border-left: 3px solid var(--smoke); padding: 2px 0 2px 12px; }
+  .note b { color: var(--fg); }
+
+  h2.sec { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  h3.sub { font-size: 14px; font-weight: 600; margin: 20px 0 10px; }
+
+  /* 徽标 */
+  .chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 1px 9px; font-size: 11.5px; font-weight: 600; }
+  .chip.smoke { background: var(--smoke-bg); color: var(--smoke); }
+  .chip.func { background: oklch(0.546 0.245 262.881 / 0.12); color: var(--primary); }
+  .chip.ok { background: oklch(0.577 0.17 149 / 0.13); color: var(--ok); }
+  .chip.err { background: oklch(0.577 0.215 27.3 / 0.13); color: var(--err); }
+  .chip.warn { background: oklch(0.65 0.19 47.6 / 0.14); color: var(--warn); }
+  .chip.dim { background: var(--muted); color: var(--muted-fg); font-weight: 500; }
+
+  /* 项目头 + 三段开关 */
+  .proj-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .proj-head .pn { font-weight: 700; font-size: 15px; }
+  .proj-head .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .seg button { border: none; background: var(--card); color: var(--muted-fg); padding: 8px 22px; font-size: 13.5px; font-weight: 600; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--smoke-bg); color: var(--smoke); }
+  .seg button.on.func { background: oklch(0.546 0.245 262.881 / 0.1); color: var(--primary); }
+
+  /* 环境沿用条 */
+  .env-strip {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
+    border: 1px dashed var(--border); border-radius: 10px; padding: 10px 14px;
+    font-size: 12.5px; color: var(--muted-fg); margin-bottom: 16px; background: var(--bg);
+  }
+  .env-strip b { color: var(--fg); font-weight: 600; }
+  .env-strip .mono { font-family: var(--mono); font-size: 12px; }
+
+  /* 弹窗仿真 */
+  .modal { max-width: 680px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .modal .mhead { padding: 16px 22px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+  .modal .mhead .x { color: var(--muted-fg); font-size: 16px; background: none; border: none; }
+  .modal .mbody { padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+  .modal .mfoot { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .modal .mfoot .lhint { font-size: 12px; color: var(--muted-fg); }
+  .modal .mfoot .btns { display: flex; gap: 10px; margin-left: auto; }
+
+  .field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted-fg); margin-bottom: 6px; }
+  .field label .req { color: var(--err); }
+  .field input[type=text], .field textarea {
+    width: 100%; border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+    border-radius: 8px; padding: 9px 12px; font-size: 13.5px; font-family: inherit;
+  }
+  .field textarea { font-family: var(--mono); font-size: 12.5px; line-height: 1.7; resize: vertical; }
+  .hint { font-size: 12px; color: var(--muted-fg); margin-top: 6px; }
+  .hint a { color: var(--primary); text-decoration: none; }
+
+  /* 环境沿用只读块（弹窗内） */
+  .env-block { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .env-block .row { display: flex; gap: 10px; font-size: 12.5px; flex-wrap: wrap; align-items: center; }
+  .env-block .row .k { color: var(--muted-fg); min-width: 62px; }
+  .env-block .row .v { font-weight: 600; }
+  .env-block .row .v.mono { font-family: var(--mono); font-weight: 500; font-size: 12px; }
+  .env-pills { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .env-pills button { border: none; background: var(--card); padding: 3px 14px; font-size: 12px; color: var(--muted-fg); }
+  .env-pills button.on { background: var(--smoke-bg); color: var(--smoke); font-weight: 600; }
+  .env-pills button + button { border-left: 1px solid var(--border); }
+  .adv-link { font-size: 12px; color: var(--primary); background: none; border: none; padding: 0; text-align: left; }
+  .adv-field { display: none; }
+  .adv-field.show { display: block; }
+
+  .btn { border-radius: 8px; padding: 8px 18px; font-size: 13.5px; font-weight: 600; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+  .btn.smoke { background: var(--smoke); border-color: var(--smoke); color: #fff; }
+  .btn.ghost { background: none; }
+  .btn.sm { padding: 5px 12px; font-size: 12.5px; }
+
+  .checkline { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--muted-fg); }
+  .checkline input { margin-top: 3px; accent-color: var(--smoke); }
+
+  /* 内嵌 skill 说明块 */
+  .builtin { border: 1px solid var(--border); border-radius: 10px; background: var(--muted); padding: 12px 16px; }
+  .builtin .bt { font-weight: 600; font-size: 12.5px; margin-bottom: 8px; }
+  .builtin ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+  .builtin li { font-size: 12px; color: var(--muted-fg); line-height: 1.6; }
+  .builtin li b { color: var(--fg); font-weight: 600; }
+  .builtin .bfoot { font-size: 11.5px; color: var(--muted-fg); margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+  /* 流水线 */
+  .pipe { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+  .pnode {
+    min-width: 190px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--bg);
+    display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+  }
+  .pnode .nt { font-weight: 700; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pnode .nd { font-size: 11.5px; color: var(--muted-fg); line-height: 1.5; }
+  .pnode.done { border-color: oklch(0.577 0.17 149 / 0.45); }
+  .pnode.cur { border-color: var(--smoke); box-shadow: 0 0 0 3px var(--smoke-bg); }
+  .pnode.wait { opacity: .6; }
+  .parrow { align-self: center; padding: 0 8px; color: var(--muted-fg); flex-shrink: 0; }
+
+  .task-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--bg); }
+  .task-card + .task-card { margin-top: 10px; }
+  .task-card .tn { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .task-card .ts { font-size: 12px; color: var(--muted-fg); margin-top: 2px; }
+  .task-card.new { border-style: dashed; justify-content: center; color: var(--muted-fg); font-weight: 600; cursor: pointer; }
+
+  /* 表格 */
+  .tblwrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 660px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted-fg); font-weight: 600; background: var(--muted); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td.id { font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--muted-fg); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 14px 0 0; flex-wrap: wrap; }
+  .toolbar .left { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* 执行进度 */
+  .exec-log { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 2; overflow-x: auto; }
+  .exec-log .ln { white-space: nowrap; }
+  .exec-log .ok { color: var(--ok); }
+  .exec-log .err { color: var(--err); }
+  .exec-log .dim { color: var(--muted-fg); }
+  .exec-log .obs { color: var(--warn); }
+  .exec-log .cur { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .statline { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+
+  /* 报告 */
+  .verdict { border-radius: 12px; padding: 16px 20px; display: flex; gap: 14px; align-items: flex-start; margin-bottom: 20px; border: 1px solid; }
+  .verdict.fail { background: oklch(0.577 0.215 27.3 / 0.08); border-color: oklch(0.577 0.215 27.3 / 0.35); }
+  .verdict .vi { font-size: 22px; line-height: 1.2; }
+  .verdict .vt { font-weight: 700; font-size: 15px; margin-bottom: 3px; }
+  .verdict .vd { font-size: 13px; color: var(--muted-fg); }
+  .kv { display: flex; gap: 26px; flex-wrap: wrap; margin-bottom: 18px; }
+  .kv .k { font-size: 12px; color: var(--muted-fg); }
+  .kv .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
+  /* Bug 清单列表 + 人工复核 */
+  table.buglist { min-width: 940px; font-size: 12.5px; }
+  table.buglist td { line-height: 1.65; }
+  table.buglist tr.reviewed { background: oklch(0.577 0.17 149 / 0.05); }
+  select.sev { border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 3px 6px; font-size: 12px; font-family: inherit; }
+  .rev-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+  .rev-done { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rev-note { font-size: 11.5px; color: var(--muted-fg); margin-top: 6px; }
+  .obsCard { border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 10px; padding: 10px 16px; margin-top: 10px; font-size: 13px; }
+  .obsCard .ot { font-weight: 600; }
+  .obsCard .od { color: var(--muted-fg); font-size: 12.5px; margin-top: 2px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+
+  footer.foot { margin-top: 36px; color: var(--muted-fg); font-size: 12px; text-align: center; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>冒烟测试 · 交互原型 <span class="mono" style="color:var(--muted-fg)">v2</span></h1>
+    <span class="chip smoke">测试工作台第三形态</span>
+  </header>
+  <p class="subtitle">
+    冒烟测试 = 测试工作台第三段页签。环境信息（系统名称 / 地址 / 登录态）<b>全部沿用现有环境配置</b>，
+    原提示词中所有 <code>&lt;占位符&gt;</code> 转为页面输入或平台自动提供（见第 2 屏映射表）。
+    无门控：创建任务即自动执行直至出报告。
+  </p>
+  <div class="decisions">
+    <span>✅ 入口：<b>第三段页签</b></span>
+    <span>✅ 门控：<b>无（创建即跑）</b></span>
+    <span>✅ 环境：<b>沿用环境配置</b></span>
+    <span>✅ 插件命令：<b>本期不做</b></span>
+    <span>✅ 场景来源：<b>仅手动录入</b></span>
+    <span>✅ Bug 清单：<b>列表 + 人工复核</b></span>
+  </div>
+
+  <nav class="steps" aria-label="原型步骤">
+    <button class="active" data-s="s1"><span class="n">1</span>冒烟页签（入口）</button>
+    <button data-s="s2"><span class="n">2</span>新建冒烟任务 + 字段映射</button>
+    <button data-s="s3"><span class="n">3</span>任务流水线（无门控）</button>
+    <button data-s="s4"><span class="n">4</span>执行中</button>
+    <button data-s="s5"><span class="n">5</span>冒烟报告</button>
+  </nav>
+
+  <!-- ═══ Screen 1 · 冒烟页签 ═══ -->
+  <section class="screen active" id="s1">
+    <div class="stage">
+      <div class="proj-head">
+        <div class="pn">📁 评估管理系统（~/projects/eval-admin）</div>
+        <div class="acts">
+          <button class="btn sm ghost">⚙️ 环境配置</button>
+          <button class="btn sm ghost">📚 回归用例库</button>
+        </div>
+      </div>
+
+      <div class="seg" role="tablist">
+        <button>功能测试</button>
+        <button>回归测试</button>
+        <button class="on">冒烟测试</button>
+      </div>
+
+      <div class="env-strip">
+        <span>沿用环境配置：</span>
+        <span>系统 <b>评估管理系统</b></span>
+        <span>环境 <b>sit</b></span>
+        <span class="mono">https://sit.example.com/eval</span>
+        <span>登录态 <b style="color:var(--ok)">已捕获 storageState</b></span>
+        <span style="margin-left:auto">改配置 → 「环境配置」按钮（现有抽屉）</span>
+      </div>
+
+      <div class="task-card new" onclick="go('s2')" tabindex="0">＋ 新建冒烟任务</div>
+      <div class="task-card">
+        <div>
+          <div class="tn">评估机构-冒烟 <span class="chip smoke">冒烟</span><span class="chip err">未通过</span></div>
+          <div class="ts">6 场景 · 5 过 1 失败 · sit · 07-30 14:32 · 数据前缀 冒烟测试_20260730_</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm ghost" onclick="go('s5')">看报告</button>
+          <button class="btn sm ghost">重跑</button>
+        </div>
+      </div>
+      <div class="task-card">
+        <div>
+          <div class="tn">项目立项-冒烟 <span class="chip smoke">冒烟</span><span class="chip ok">通过</span></div>
+          <div class="ts">5 场景 · 全部通过 · sit · 07-29 18:05</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm ghost">看报告</button>
+          <button class="btn sm ghost">重跑</button>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>入口与信息架构</b>：三段开关 功能 | 回归 | 冒烟（与回归同级）。冒烟页签 = 按 type 过滤的任务看板（复用现有任务卡组件），功能看板不混入冒烟任务。环境条只是「沿用信息」的展示，配置本体仍在现有「环境配置」抽屉（TestEnvDrawer），冒烟不建第二套环境体系。</p>
+  </section>
+
+  <!-- ═══ Screen 2 · 新建冒烟任务 ═══ -->
+  <section class="screen" id="s2">
+    <div class="modal">
+      <div class="mhead">新建冒烟任务 <button class="x" aria-label="关闭">✕</button></div>
+      <div class="mbody">
+
+        <div class="field">
+          <label>测试环境（沿用环境配置，无需重复填写）</label>
+          <div class="env-block">
+            <div class="row"><span class="k">环境</span>
+              <span class="env-pills"><button>local</button><button class="on">sit</button></span>
+            </div>
+            <div class="row"><span class="k">系统名称</span><span class="v">评估管理系统</span><span class="chip dim">来自环境配置</span></div>
+            <div class="row"><span class="k">系统地址</span><span class="v mono">https://sit.example.com/eval</span><span class="chip dim">sit · frontendBaseUrl</span></div>
+            <div class="row"><span class="k">登录态</span><span class="v" style="color:var(--ok)">已捕获 storageState（sit · qa账号）</span><span class="chip dim">cookie 无需手填</span></div>
+            <button class="adv-link" onclick="toggleAdv()">▸ 本任务覆盖被测地址（可选，一般不需要）</button>
+            <div class="adv-field field" id="advUrl">
+              <input type="text" placeholder="https://…（留空 = 跟随所选环境）">
+              <div class="hint">仅覆盖地址；登录态仍按所选环境注入（与现有任务级 targetUrl 机制一致）。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>模块名称 <span class="req">*</span></label>
+          <input type="text" value="评估机构" oninput="syncTaskName(this.value)">
+          <div class="hint">任务名自动生成：<b id="autoName">评估机构-冒烟</b>（可改）；报告标题与数据前缀均引用它。</div>
+        </div>
+
+        <div class="field">
+          <label>目标模块入口（如何进入该模块） <span class="req">*</span></label>
+          <input type="text" value="左侧导航「评估管理」→「评估机构」列表页">
+        </div>
+
+        <div class="field" id="manual-area">
+          <label>测试场景（描述「验证目标 + 预期结果」，不含具体操作步骤） <span class="req">*</span></label>
+          <textarea rows="8">添加评估机构 → 按要求填写机构信息字段，添加成功
+查看机构信息 → 操作列「查看」展示的信息与添加时一致
+条件查询 → 按得分期间、机构名称分别查询，可查到新增及已有机构
+状态操作 → 任选机构做「在库 / 已出库」切换，操作正常
+修改机构信息 → 已出库改回在库后修改信息，保存成功且生效
+删除机构 → 任选机构删除，删除成功、列表不再显示</textarea>
+          <div class="hint">
+            每行一条，格式「验证目标 → 预期结果」；不要写点击步骤——执行时 AI 自主探索页面完成场景。<br>
+            创建后即自动执行（无门控），执行前后随时可改场景并重跑。<span class="chip dim" style="margin-left:4px">AI 生成场景 · P2 规划中</span>
+          </div>
+        </div>
+
+        <div class="env-strip" style="margin:0">
+          <span>🏷️ 测试数据前缀 <b class="mono">冒烟测试_20260730_</b>（平台按日期自动生成）</span>
+          <span>📸 截图 / 录像目录由平台自动管理</span>
+        </div>
+
+        <div class="builtin">
+          <div class="bt">🔒 以下内容已内嵌为平台冒烟 skill，无需录入</div>
+          <ul>
+            <li><b>【角色与目标】</b>——冒烟测试工程师角色 + 「仅验主流程，不覆盖边界/异常/权限」目标，内嵌为执行步 system prompt</li>
+            <li><b>【全局规则（必须遵守）】</b>——数据可识别前缀 / 数据安全（只动自建数据）/ 自主执行 / 判定原则 / 失败不中断 / 截图规范 / 截图稳定性，共 7 条内嵌为 <span class="mono">rules/smoke-test.md</span> + 执行 prompt 铁律块</li>
+            <li><b>【交付：测试报告结构】</b>——五段式报告（环境与时间 / 场景结果表 / Bug 清单 / 体验问题 / 整体结论）内嵌为冒烟报告 prompt 模板</li>
+          </ul>
+          <div class="bfoot">这三段每次冒烟都相同 → 沉淀进平台，不再逐次复制粘贴；表单只留「每次都不同」的 3 项。</div>
+        </div>
+      </div>
+      <div class="mfoot">
+        <span class="lhint">创建后自动执行：场景落盘 → 冒烟执行 → 冒烟报告</span>
+        <span class="btns">
+          <button class="btn ghost">取消</button>
+          <button class="btn smoke" onclick="go('s3')">创建并开始执行</button>
+        </span>
+      </div>
+    </div>
+
+    <h3 class="sub" style="margin-top:26px">原提示词 <span class="mono">&lt;占位符&gt;</span> → 页面来源映射（本次改造的核心口径）</h3>
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th style="width:34%">提示词中的占位 / 段落</th><th>现在从哪来</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;系统名称&gt;</code></td><td>环境配置的系统名称（沿用，只读展示）</td></tr>
+          <tr><td><code>&lt;URL&gt;</code> 系统地址</td><td>环境配置所选环境的 frontendBaseUrl（可选任务级覆盖）</td></tr>
+          <tr><td>cookie 信息</td><td>环境配置登录态：storageState / 密码账号自动注入，<b>无需手填</b></td></tr>
+          <tr><td><code>&lt;模块名称&gt;</code></td><td>新建表单「模块名称」输入框</td></tr>
+          <tr><td><code>&lt;如何进入该模块&gt;</code></td><td>新建表单「目标模块入口」输入框</td></tr>
+          <tr><td>【测试场景（验证目标 + 预期结果，不含操作步骤）】段</td><td>新建表单「测试场景」textarea 手动录入（每行一条；AI 生成为 P2）</td></tr>
+          <tr><td>前缀 <code>冒烟测试_&lt;模型/日期&gt;_</code></td><td>平台自动生成 <code>冒烟测试_{YYYYMMDD}_</code>，表单内展示</td></tr>
+          <tr><td><code>&lt;截图目录&gt;</code> + 截图命名 / 稳定性规则</td><td>平台证据目录与截图机制自动管理（报告内可点开）</td></tr>
+          <tr><td>【角色与目标】</td><td>内嵌为冒烟执行角色 system prompt（平台内置，无需输入）</td></tr>
+          <tr><td>【全局规则（必须遵守）】</td><td>内嵌为冒烟规则文件 rules/smoke-test.md + 执行 prompt 铁律块（平台内置，无需输入）</td></tr>
+          <tr><td>【交付：测试报告结构】</td><td>内嵌为冒烟报告 prompt 模板（第 5 屏结构，平台内置，无需输入）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><b>表单只剩 3 个必填</b>：模块名称、模块入口、场景（或模块描述）。其余全部由环境配置沿用或平台自动提供——这正是「提示词 → 产品」的价值：每次冒烟不再复制粘贴改提示词。</p>
+  </section>
+
+  <!-- ═══ Screen 3 · 任务流水线 ═══ -->
+  <section class="screen" id="s3">
+    <div class="stage">
+      <h2 class="sec">评估机构-冒烟 <span class="chip smoke">冒烟</span>
+        <span class="mono" style="color:var(--muted-fg)">sit · https://sit.example.com/eval（沿用环境）· 前缀 冒烟测试_20260730_</span>
+      </h2>
+      <div class="pipe">
+        <div class="pnode done">
+          <div class="nt">💨 测试场景 <span class="chip ok">已就绪</span></div>
+          <div class="nd">6 条场景已落盘（SM-001…006）</div>
+        </div>
+        <div class="parrow">→</div>
+        <div class="pnode cur">
+          <div class="nt">▶️ 冒烟执行 <span class="chip warn">进行中</span></div>
+          <div class="nd">自主探索式 · 场景 5/6 · <a href="#" onclick="go('s4');return false" style="color:var(--smoke)">查看实时进度</a></div>
+        </div>
+        <div class="parrow">→</div>
+        <div class="pnode wait">
+          <div class="nt">🔥 冒烟报告</div>
+          <div class="nd">执行完自动生成</div>
+        </div>
+      </div>
+
+      <h3 class="sub">测试场景（无门控 · 随时可改，改后重跑）</h3>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th style="width:70px">ID</th><th style="width:26%">验证目标</th><th>预期结果</th></tr></thead>
+          <tbody>
+            <tr><td class="id">SM-001</td><td>添加评估机构</td><td>按要求填写机构信息字段，添加成功，列表出现新机构</td></tr>
+            <tr><td class="id">SM-002</td><td>查看机构信息</td><td>操作列「查看」打开详情，内容与添加时填写一致</td></tr>
+            <tr><td class="id">SM-003</td><td>条件查询</td><td>按得分期间、机构名称分别查询，可查到新增机构与已有机构</td></tr>
+            <tr><td class="id">SM-004</td><td>状态操作</td><td>对机构执行「在库 / 已出库」切换，状态变更生效</td></tr>
+            <tr><td class="id">SM-005</td><td>修改机构信息</td><td>已出库改回在库后修改信息，保存成功、详情反映修改</td></tr>
+            <tr><td class="id">SM-006</td><td>删除机构</td><td>删除成功，列表不再显示该机构</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="toolbar">
+        <div class="left">
+          <button class="btn sm ghost">✏️ 编辑场景</button>
+          <button class="btn sm ghost">＋ 添加场景</button>
+        </div>
+        <button class="btn sm ghost">⏹ 停止执行</button>
+      </div>
+    </div>
+    <p class="note"><b>无门控的含义</b>：创建即自动「场景落盘 → 执行 → 报告」一路推进（复用现有 auto-chain）。场景清单节点保留展示与编辑入口——执行中只读，执行后可改；修改场景会重置下游（执行/报告）状态，点「重跑」再来一轮。需求分析 / 用例设计节点对冒烟任务不存在。</p>
+  </section>
+
+  <!-- ═══ Screen 4 · 执行中 ═══ -->
+  <section class="screen" id="s4">
+    <div class="stage">
+      <h2 class="sec">▶️ 冒烟执行中 <span class="chip smoke">冒烟</span>
+        <span class="mono" style="color:var(--muted-fg)">后台无头 · 登录态已注入（storageState）</span>
+      </h2>
+      <div class="exec-log">
+        <div class="ln dim">环境预检通过（探活 200 · 342ms）· 数据前缀 冒烟测试_20260730_ · 只操作本次自建数据</div>
+        <div class="ln ok">✔ SM-001 添加评估机构 — pass（已建「冒烟测试_20260730_机构A」）</div>
+        <div class="ln ok">✔ SM-002 查看机构信息 — pass</div>
+        <div class="ln err">✘ SM-003 条件查询 — fail（按名称查询返回空列表，实际 vs 预期不符，已采集接口证据）</div>
+        <div class="ln obs">⚠ 观察：状态切换约 4s 才更新，期间无 loading（记入体验问题）</div>
+        <div class="ln ok">✔ SM-004 状态操作 — pass</div>
+        <div class="ln cur">▶ SM-005 修改机构信息 …（场景 5/6）</div>
+        <div class="ln dim">□ SM-006 删除机构</div>
+      </div>
+      <div class="statline">
+        <span class="chip ok">pass 3</span>
+        <span class="chip err">fail 1</span>
+        <span class="chip warn">partial 0</span>
+        <span class="chip dim">blocked 0</span>
+        <span class="chip dim num">场景 5/6</span>
+        <button class="btn sm ghost" style="margin-left:auto">⏹ 停止</button>
+      </div>
+      <div class="toolbar"><div class="left"></div><button class="btn smoke" onclick="go('s5')">执行完成，查看冒烟报告 →</button></div>
+    </div>
+    <p class="note"><b>与功能测试执行的差异只在 prompt</b>：场景是「验证目标」而非固定步骤——AI 先 snapshot 观察页面、自主探索完成场景；失败不中断（依赖场景跳过判 blocked）；顺带输出 <code>@@OBSERVATION</code> 体验观察。执行机器（探活闸门 / 登录态注入 / 有头无头 / @@RESULT 四态归约 / 截图录像证据）全部现有。</p>
+  </section>
+
+  <!-- ═══ Screen 5 · 冒烟报告 ═══ -->
+  <section class="screen" id="s5">
+    <div class="stage">
+      <h2 class="sec">🔥 冒烟报告 <span class="chip smoke">冒烟</span>
+        <span class="mono" style="color:var(--muted-fg)">评估机构-冒烟 · 评估管理系统 · sit（沿用环境配置）· 2026-07-30 14:32</span>
+      </h2>
+
+      <div class="verdict fail">
+        <div class="vi">🚫</div>
+        <div>
+          <div class="vt">冒烟未通过 —— 暂不具备进入详细测试的条件 <span class="chip warn">1 项待人工复核</span></div>
+          <div class="vd">主流程 6 条场景 5 过 1 失败：条件查询（SM-003）按名称查询无结果，属主流程断点。建议修复后重跑冒烟，通过后再开展功能 / 回归测试。<b>若复核判定该失败为 AI 误报，结论将更新为「通过（经人工复核）」。</b></div>
+        </div>
+      </div>
+
+      <div class="kv">
+        <div><div class="k">场景总数</div><div class="v num">6</div></div>
+        <div><div class="k">通过</div><div class="v num" style="color:var(--ok)">5</div></div>
+        <div><div class="k">失败</div><div class="v num" style="color:var(--err)">1</div></div>
+        <div><div class="k">阻塞 / 部分</div><div class="v num">0</div></div>
+        <div><div class="k">执行耗时</div><div class="v num">6m 41s</div></div>
+        <div><div class="k">数据前缀</div><div class="v mono">冒烟测试_20260730_</div></div>
+      </div>
+
+      <h3 class="sub">一、场景结果表</h3>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>场景</th><th>验证目标</th><th>预期</th><th>实际</th><th>结论</th><th>截图</th></tr></thead>
+          <tbody>
+            <tr><td class="id">SM-001</td><td>添加评估机构</td><td>填写字段后添加成功</td><td>新增「冒烟测试_20260730_机构A」成功，列表可见</td><td><span class="chip ok">通过</span></td><td class="mono">SM-001.png</td></tr>
+            <tr><td class="id">SM-002</td><td>查看机构信息</td><td>详情与添加时一致</td><td>详情字段与录入一致</td><td><span class="chip ok">通过</span></td><td class="mono">SM-002.png</td></tr>
+            <tr><td class="id">SM-003</td><td>条件查询</td><td>两种条件均可查到机构</td><td>得分期间查询正常；<b>按名称查询返回空列表</b></td><td><span class="chip err">失败</span></td><td class="mono">SM-003.png</td></tr>
+            <tr><td class="id">SM-004</td><td>状态操作</td><td>在库 / 已出库切换生效</td><td>两向切换均生效</td><td><span class="chip ok">通过</span></td><td class="mono">SM-004.png</td></tr>
+            <tr><td class="id">SM-005</td><td>修改机构信息</td><td>修改保存且生效</td><td>修改联系人后详情已更新</td><td><span class="chip ok">通过</span></td><td class="mono">SM-005.png</td></tr>
+            <tr><td class="id">SM-006</td><td>删除机构</td><td>删除后列表不再显示</td><td>删除「冒烟测试_20260730_机构A」成功</td><td><span class="chip ok">通过</span></td><td class="mono">SM-006.png</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="sub">二、Bug 清单（人工复核）
+        <span class="chip dim num" style="margin-left:6px">已复核 1/2</span>
+      </h3>
+      <div class="tblwrap">
+        <table class="buglist">
+          <thead><tr>
+            <th style="width:64px">编号</th><th style="width:20%">标题</th><th style="width:88px">严重级别</th>
+            <th style="width:70px">场景</th><th>实际 vs 预期</th><th style="width:92px">证据</th><th style="width:210px">人工复核</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="id">BUG-01</td>
+              <td>机构名称查询无结果</td>
+              <td>
+                <select class="sev">
+                  <option>致命</option><option selected>严重</option><option>一般</option><option>建议</option>
+                </select>
+              </td>
+              <td class="id">SM-003</td>
+              <td>
+                实际：名称输入「冒烟测试_20260730_机构A」查询返回空列表<br>
+                预期：应查到该机构（得分期间条件可查到，证明数据存在）<br>
+                <span class="mono" style="color:var(--muted-fg)">GET /api/eval/orgs?name=…（200，data: []）</span>
+              </td>
+              <td><span class="mono">bug01.png</span></td>
+              <td>
+                <div class="rev-actions">
+                  <button class="btn sm smoke">✓ 确认缺陷</button>
+                  <button class="btn sm ghost">✕ 误报</button>
+                  <button class="btn sm ghost">≠ 程度不符</button>
+                </div>
+                <div class="rev-note">可加复核备注</div>
+              </td>
+            </tr>
+            <tr class="reviewed">
+              <td class="id">BUG-02</td>
+              <td>删除后列表未即时刷新</td>
+              <td>
+                <select class="sev">
+                  <option>致命</option><option>严重</option><option selected>一般</option><option>建议</option>
+                </select>
+              </td>
+              <td class="id">SM-006</td>
+              <td>
+                实际：删除成功提示出现，但列表仍显示该机构，手动刷新后消失<br>
+                预期：删除后列表即时不再显示
+              </td>
+              <td><span class="mono">bug02.png</span></td>
+              <td>
+                <div class="rev-done"><span class="chip ok">✓ 已确认缺陷</span><button class="btn sm ghost">撤销</button></div>
+                <div class="rev-note">复核人备注：确属缺陷，已提单 EVAL-1032</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="toolbar">
+        <div class="left">
+          <button class="btn sm ghost">剩余全部确认为缺陷</button>
+          <button class="btn sm ghost">📤 导出缺陷单给开发</button>
+        </div>
+        <span class="hint" style="margin:0">复核结果汇入「AI 判定准确度」统计（复用现有报告复核机制）</span>
+      </div>
+      <p class="note" style="margin-top:12px"><b>复核会不会改结论？</b>会，但双记录：若 BUG-01 被复核为「误报」，结论横幅变为「冒烟通过（经人工复核，1 项 AI 误报已排除）」，同时保留 AI 原始判定供追溯——不覆盖历史事实。</p>
+
+      <h3 class="sub">三、奇怪交互 / 体验问题（非阻塞观察）</h3>
+      <div class="obsCard"><div class="ot">保存后无成功提示</div><div class="od">SM-005 修改保存后按钮无反馈、无 toast，需手动刷新才能确认已生效。</div></div>
+      <div class="obsCard"><div class="ot">状态切换响应慢</div><div class="od">SM-004 「已出库 → 在库」点击后约 4s 才更新，期间无 loading 态。</div></div>
+
+      <h3 class="sub">四、整体结论</h3>
+      <p style="font-size:13.5px">主流程 6 条场景中 5 条走通；<b>条件查询存在主流程断点（按名称查询失效）</b>，判定本轮<b>冒烟未通过</b>，暂不具备进入功能 / 回归测试的条件。建议修复 BUG-01 后重跑本冒烟任务（场景直接复用，任务卡「重跑」即可）。测试数据均按前缀「冒烟测试_20260730_」创建，并已在 SM-006 清理。<br>
+      <span style="color:var(--muted-fg)">复核状态：2 个 Bug 已复核 1 个（BUG-02 确认为缺陷），BUG-01 待复核；复核完成后本结论按复核口径更新。</span></p>
+    </div>
+    <p class="note"><b>报告差异</b>：结论口径 = 主流程是否走得通 + 是否具备进一步测试条件（有 fail 即未通过）；<b>Bug 清单为可复核列表</b>（严重级别可人工调整、复核动作复用现有报告复核机制与准确度统计）；「体验问题」章节来自执行中的 <code>@@OBSERVATION</code> 观察；不出需求覆盖矩阵 / 回归红线。报告进现有报告区，可看历史轮次对比。</p>
+  </section>
+
+  <footer class="foot">冒烟测试功能原型 v2 · 配套方案文档 docs/research/smoke-test-feature-proposal.md · 仅为交互示意，非最终视觉</footer>
+</div>
+
+<script>
+  const stepBtns = document.querySelectorAll('.steps button');
+  function go(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+    stepBtns.forEach(b => b.classList.toggle('active', b.dataset.s === id));
+    window.scrollTo({ top: 0 });
+  }
+  stepBtns.forEach(b => b.addEventListener('click', () => go(b.dataset.s)));
+
+  function toggleAdv() {
+    document.getElementById('advUrl').classList.toggle('show');
+  }
+  function syncTaskName(v) {
+    document.getElementById('autoName').textContent = (v || '模块') + '-冒烟';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+import{test,expect}from'@playwright/test';
+import fs from'node:fs';import path from'node:path';
+const output=path.resolve(process.env.PPT_UI_ACCEPTANCE_OUTPUT||'outputs/ppt-ml-editorial-20261020/ui-release');
+test('@live-ppt nearby AI keeps its range through IME, zoom, viewport changes, neighbouring page and late cancellation',async({page})=>{
+ const manifest=JSON.parse(fs.readFileSync(path.join(output,'manifest.json'),'utf8')),id=manifest.projectId;
+ const get=async()=>{const r=await page.request.get(`/api/ppt/projects/${id}`,{timeout:120000});expect(r.ok()).toBeTruthy();return(await r.json()).project;};const before=await get();
+ const closing=before.deck.slides.at(-1),node=closing.nodes.find((n:{content?:{text?:string}})=>n.content?.text?.includes('tiny'));
+ await page.goto(`/ppt?projectId=${id}`);await expect(page.getByTestId('ppt-structured-editor')).toBeVisible({timeout:120000});
+ await page.getByRole('button',{name:/24\. Rigorous validation before complexity/u}).click();
+ const object=page.locator(`[data-node-id="${node.id}"]`);await object.click();const composer=page.getByTestId('ppt-inline-ai');await expect(composer).toBeVisible();
+ await object.dblclick();const textarea=object.locator('textarea');await textarea.evaluate((el:HTMLTextAreaElement)=>{el.focus();const at=el.value.indexOf('tiny');el.setSelectionRange(at,at);});await page.keyboard.down('Shift');for(let i=0;i<4;i++)await page.keyboard.press('ArrowRight');await page.keyboard.up('Shift');await expect(page.getByTestId('ppt-inline-target')).toContainText('所选文字');
+ const instruction=composer.getByRole('textbox',{name:'编辑要求',exact:true});await instruction.fill('Keep only this selected source phrase.');
+ const posts:Record<string,unknown>[]=[];let release:()=>void=()=>{};const pending=new Promise<void>(r=>release=r);
+ await page.route(/\/ai-edit(?:\?|$)/u,async route=>{posts.push(route.request().postDataJSON());await pending;await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Frozen target revision conflict; reload before retrying.'})});});
+ await instruction.dispatchEvent('keydown',{key:'Enter',ctrlKey:true,isComposing:true});await page.waitForTimeout(100);expect(posts).toHaveLength(0);
+ await instruction.dispatchEvent('keydown',{key:'Escape',isComposing:true});await expect(composer).toBeVisible();
+ await page.locator('.ppt-editor-status').getByRole('button',{name:'−',exact:true}).click();await expect(page.locator('.ppt-editor-status')).toContainText('90%');await expect(composer).toBeVisible();
+ await page.setViewportSize({width:700,height:900});await expect.poll(async()=>{const r=await composer.boundingBox();return Boolean(r&&r.x>=0&&r.y>=0&&r.x+r.width<=700&&r.y+r.height<=900);}).toBe(true);
+ await page.screenshot({path:path.join(output,'10-inline-mobile-anchor.png')});
+ await instruction.focus();await page.keyboard.press('Control+Enter');await expect.poll(()=>posts.length).toBe(1);expect(posts[0]).toMatchObject({slideId:closing.id,nodeId:node.id,baseRevision:before.revision,target:{expectedText:'tiny'}});
+ await page.setViewportSize({width:1440,height:1100});await page.getByRole('button',{name:/23\. Production controls/u}).click();await expect(page.getByTestId('ppt-inline-target')).toContainText('24');
+ await composer.getByRole('button',{name:'取消',exact:true}).click();await expect(composer).toHaveCount(0);release();await page.waitForTimeout(300);
+ const after=await get();expect(after.revision).toBe(before.revision);expect(after.source.text).toBe(before.source.text);expect(after.deck.slides).toEqual(before.deck.slides);await expect(composer).toHaveCount(0);
+ fs.writeFileSync(path.join(output,'composer-interactions.json'),JSON.stringify({projectId:id,range:'tiny',imeEnterSuppressed:true,imeEscapeSuppressed:true,zoom:90,mobileAnchorWithinViewport:true,neighbourPageKeptFrozenTarget:true,lateCancelled409Ignored:true,revisionUnchanged:true,posts},null,2));
+});

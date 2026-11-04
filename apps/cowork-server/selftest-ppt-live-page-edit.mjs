@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {scopeReview} from './ppt-scope-test-helpers.mjs';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-live-page-edit-'));process.env.COWORK_STATE_DIR=root;
+const [store,repo,ir,templates,proposals,commands,render,context,nav]=await Promise.all(['./lib/ppt-store.mjs','./lib/ppt/repository.mjs','./lib/ppt/ir.mjs','./lib/ppt-template.mjs','./lib/ppt/proposal-service.mjs','./lib/ppt/command-service.mjs','./lib/ppt/render-tree.mjs','./lib/ppt/edit-context.mjs','./lib/ppt-deck-navigation.mjs'].map(p=>import(p)));
+const uid='live-edit-regression',noop=()=>{},deps={modelCall:async(p,prompt)=>prompt.includes('整稿演示文稿内容评审器')?scopeReview(p):{content:{text:'How the mechanism works'}}};
+function fixture(status){
+ const titles=['Introduction','Mechanism','Limitations','Conclusion'];
+ const slides=titles.map((title,i)=>({id:'s'+i,title,bullets:i?['Validate comparable measurement conditions before using the measured signal.']:[],layoutId:i===0?'cover':i===3?'conclusion':'summary'}));
+ const p=ir.ensureProjectV3({uid,id:store.newId(),title:'Mechanism',prompt:'Explain a mechanism and its limitations.',template:'light',templateSpec:templates.snapshotTemplate(templates.BUILT_INS.find(t=>t.id==='light')),status,stage:'generation',pages:4,revision:1,publishedRevision:0,currentRunId:'run-current',pageDecision:{mode:'explicit',finalPageCount:4},outline:slides.map(s=>({id:s.id,title:s.title,focus:s.title,refs:[]})),deck:{slides},nodes:{},editing:{epochs:{},intents:{},scopes:{}},runtime:{slides:{}}});
+ p.renderTree=render.buildRenderTree(p);for(const s of p.deck.slides){p.nodes[s.id]={status:'done',slide:structuredClone(s)};p.runtime.slides[s.id]={phase:'render_ready',preview:p.renderTree.slides.find(t=>t.id===s.id),quality:{issues:[]}};}repo.saveProject(p);repo.saveRevision(p,'baseline');return p;
+}
+try{
+ for(const status of ['generating','failed']){
+  let p=fixture(status);const title=p.deck.slides[1].nodes.find(n=>n.semanticRole==='title');const data={scope:'object',type:'title',slideId:'s1',nodeId:title.id,instruction:'Clarify the title',baseRevision:p.revision};
+  const preview=await proposals.createProposal(p,data,deps,noop,noop);assert.equal(preview.liveEditContext.runId,'run-current');
+  const other=p.deck.slides[2].nodes.find(n=>n.semanticRole==='title');await commands.applyCommand(uid,p.id,{type:'node.setContent',baseRevision:p.revision,payload:{slideId:'s2',nodeId:other.id,content:{text:'Comparable conditions'}}});
+  const applied=await proposals.applyProposal(uid,p.id,preview.id);assert.equal(applied.project.nodes.s1.slide.title,'How the mechanism works');assert.equal(applied.project.editing.epochs.s1,1);assert.equal(applied.project.nodes.s2.slide.title,'Comparable conditions');
+  p=repo.getProject(uid,p.id);const stale=await proposals.createProposal(p,{...data,baseRevision:p.revision},deps,noop,noop);p.currentRunId='run-new';repo.saveProject(p);await assert.rejects(()=>proposals.applyProposal(uid,p.id,stale.id),/generation changed/);
+ }
+ const native=fixture('failed');native.templateFidelity={mode:'preserve'};
+ const nativeTarget=native.deck.slides[1].nodes.find(n=>n.semanticRole==='title');nativeTarget.nativeRef={shapeId:12};nativeTarget.semanticRole='template-title';nativeTarget.templateSlot={role:'title',mapped:true};
+ const sibling={id:'visible-source-subtitle',type:'text',semanticRole:'source-explanation',content:{text:'Original bilingual document title | 原始双语文档标题'},style:{fontFamily:'Template font',fontSize:16,color:'#222222'},geometry:{x:0,y:100,width:900,height:60}};
+ native.deck.slides[1].nodes.push(sibling);native.nodes.s1.slide=structuredClone(native.deck.slides[1]);native.nodes.s1.slide.nodes.find(n=>n.id===sibling.id).content.text='Stale writer subtitle';repo.saveProject(native);
+ const untouched=structuredClone(native.deck.slides.flatMap(s=>s.nodes.filter(n=>n.id!==nativeTarget.id)));
+ const nativeApplied=await commands.applyCommand(uid,native.id,{type:'node.setContent',baseRevision:native.revision,payload:{slideId:'s1',nodeId:nativeTarget.id,content:{text:'Edited headline'}}});
+ assert.deepEqual(nativeApplied.project.deck.slides.flatMap(s=>s.nodes.filter(n=>n.id!==nativeTarget.id)),untouched,'native local edits must retain validated deck, not stale writer or global template rebind');
+ const nativeUndone=await commands.undo(uid,native.id,uid,nativeApplied.operation.id);assert.deepEqual(nativeUndone.project.deck.slides.flatMap(s=>s.nodes.filter(n=>n.id!==nativeTarget.id)),untouched);
+ const partial=fixture('failed'),ready=structuredClone(partial.deck.slides[1]);partial.runtime.slides.s1.canonicalSlide=ready;partial.deck=null;partial.nodes.s0.status='pending';partial.nodes.s2.status='pending';partial.nodes.s3.status='pending';repo.saveProject(partial);
+ const recovered=repo.getProject(uid,partial.id);assert.equal(recovered.deck.slides.length,4);assert.deepEqual(recovered.deck.slides[1].nodes,ready.nodes);assert.equal(store.get(uid,partial.id).deck,null,'read projection stays read-only');assert.throws(()=>context.pageEditContext(recovered,'s2'),/finish validation/);
+ const readyTitle=ready.nodes.find(n=>n.semanticRole==='title');const partialProposal=await proposals.createProposal(recovered,{scope:'object',type:'title',slideId:'s1',nodeId:readyTitle.id,instruction:'Clarify title',baseRevision:recovered.revision},deps,noop,noop);const partialApplied=await proposals.applyProposal(uid,partial.id,partialProposal.id);assert.equal(partialApplied.project.deck.slides[1].title,'How the mechanism works');assert.equal(partialApplied.project.nodes.s2.status,'pending');
+ let p=fixture('generating');p.nodes.s1.status='running';assert.throws(()=>context.pageEditContext(p,'s1'),/finish validation/);p.nodes.s1.status='done';p.runtime.slides.s1.quality.issues=[{severity:'error'}];assert.throws(()=>context.pageEditContext(p,'s1'),/finish validation/);p.runtime.slides.s1.quality.issues=[];assert.throws(()=>context.pageEditContext(p,'s1','structure'),/freeze/);
+ p.status='failed';p.stage='outline';assert.throws(()=>context.pageEditContext(p,'s1'),/input or outline/);
+ p=fixture('generating');p.runtime.slides.s1.accepted=true;repo.saveProject(p);const title=p.deck.slides[1].nodes.find(n=>n.semanticRole==='title');await assert.rejects(()=>proposals.createProposal(p,{scope:'object',type:'title',slideId:'s1',nodeId:title.id,instruction:'Clarify title',baseRevision:1},deps,noop,noop),/accepted/);
+ const sourceNav={revision:2,generationPolicy:{content:'full_source',language:{locale:'zh'}},source:{semantic:{inventory:{items:[{id:'a',sectionPath:['Tutorial','1. Mechanism | 机制','1.1 Definition']},{id:'b',sectionPath:['Tutorial','2. Limitations | 限制']} ]}}},outline:[{id:'cover'},{id:'nav',role:'navigation'},{id:'p1',sourceUnitIds:['a'],section:'made-up 7'},{id:'p2',sourceUnitIds:['b']},{id:'p3',sourceUnitIds:['a']}],deck:{slides:['cover','nav','p1','p2','p3'].map(id=>({id}))}};
+ const navigation=nav.finalDeckNavigation(sourceNav);assert.equal(navigation.entries[0].sectionNumber,'1');assert.equal(navigation.entries[0].displayLabel,'机制');assert.deepEqual(navigation.entries[0].pageRanges,[{start:3,end:3},{start:5,end:5}]);assert.equal(navigation.entries[1].sectionNumber,'2');assert.equal(navigation.entries[1].pageStart,4);assert.ok(!navigation.entries.some(e=>e.section.includes('made-up')));
+ console.log('Live verified-page AI edits pass in generating and failed generation; other-page revision compatibility, new-run conflict, canonical epoch, pending/quality/accepted/structural negatives and source-chapter numbering pass.');
+}finally{fs.rmSync(root,{recursive:true,force:true});}

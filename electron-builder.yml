@@ -1,0 +1,320 @@
+appId: com.codepilot.app
+productName: AI Native Lab
+publish:
+  provider: github
+  owner: CmftAiLabs
+  repo: LabCodepilot
+directories:
+  output: release
+files:
+  - dist-electron/**/*
+  - "!node_modules"
+  - "!src"
+  - "!electron"
+  - "!.next"
+  - "!build"
+  - "!scripts"
+  - "!docs"
+  - "!release"
+  - "!release-win"
+  - "!data"
+extraResources:
+  # 用 "**/*" 减源码黑名单复制 standalone 顶层。
+  #
+  # 为什么不用白名单(只列 server.js+package.json):standalone 顶层的运行时依赖
+  # 散落在多个文件,白名单极易漏 —— 已两次踩坑:
+  #   1. 漏 .next/node_modules(Turbopack 的 instrumentation external 模块)→ 启动崩溃
+  #   2. 漏 .mcp.json(SDK 从 <cwd>/.mcp.json 自动加载的项目级 MCP,如 chrome-devtools)
+  #      → 自带 MCP 消失
+  # 黑名单默认复制一切,运行时文件一个不丢;源码通过下面的 ! 项显式排除。
+  #
+  # ⚠️ 切勿把 .mcp.json 列进排除 —— 它是运行时配置(见 src/lib/mcp-loader.ts:336)。
+  # !node_modules 只命中顶层那一个(体积大,由下面专门的 from 条目复制);
+  # .next/node_modules 不受影响,仍被 **/* 复制(external 模块靠它,另有专门条目兜底)。
+  #
+  # 下面的 ! 项是 Next.js NFT 误判为可达、塞进 .next/standalone/ 的整棵项目源码树,
+  # 运行时不需要(server.js 用 .next/server 编译产物),排除以免明文泄漏被用户翻看。
+  - from: .next/standalone/
+    to: standalone/
+    filter:
+      - "**/*"
+      - "!node_modules"
+      # !.next —— 关键:下方另有专门条目 `.next/standalone/.next/ → standalone/.next/`
+      # 复制这棵子树。若本条目也命中 .next(glob dot 语义),同一批源文件会被两个
+      # 条目并发写到同一批目标路径,Windows 上 copyfile 撞句柄即 EBUSY —— 9 轮
+      # CI 失败的被锁文件 100% 落在 standalone\.next\server\ 下,即此故障。
+      # 显式排除让专门条目独占该子树;若本条目本就不含 dot 目录则此行为无害空操作。
+      - "!.next"
+      # !**/*.nft.json —— NFT 构建期文件追踪清单,仅供组装 standalone 用,运行时
+      # 无任何代码读取(src/electron/scripts 全仓零引用)。CI Windows 打包时
+      # electron-builder 高并发复制三次 EBUSY 全部锁死在这类文件上(Defender
+      # 排除后依旧),整体排除既绕开文件锁竞态又减小包体。
+      - "!**/*.nft.json"
+      # !dist-electron —— 去掉 NFT 误判塞进 standalone 的主进程产物重复拷贝。
+      # 主进程真正运行的 main.js 在 app.asar 内(preload 走 __dirname/preload.js),
+      # standalone 下这份 dist-electron/{main,preload}.js 是死代码 + 明文泄漏面。
+      # CI 干净构建(next build 在 build-electron 之前)本就不含它,加此项让本地
+      # 构建向 CI 看齐;运行时无任何代码引用 standalone/dist-electron。
+      - "!dist-electron"
+      - "!release"
+      # !release-win —— Windows 打包产物(release-win/),与 release/ 同理是 NFT
+      # 误判塞进 standalone 的构建产物。漏了它会把整个 Windows 包(~700MB,含 .exe
+      # + portable.zip)塞进 macOS DMG,体积暴涨 3 倍多;CI 跨平台构建同样受影响。
+      - "!release-win"
+      # !ms-playwright-bundle —— scripts/bundle-chromium.mjs 装在仓库根的 chromium
+      # headless shell(~196MB),被 NFT 误判扫进 standalone。它已由下方专门的
+      # `from: ms-playwright-bundle/ to: ms-playwright/` 条目复制到 resources/ms-playwright,
+      # 打包态经 AILAB_RESOURCES_PATH 定位(electron/main.ts 无条件注入该 env),
+      # 故 standalone 下这份是纯重复。script-runner.ts 里 process.cwd()/ms-playwright-bundle
+      # 那条 fallback 只在 dev 态(cwd=仓库根)生效,打包态先被 resolveBundledHeadlessShell 命中。
+      - "!ms-playwright-bundle"
+      - "!src"
+      - "!electron"
+      - "!apps"
+      - "!docs"
+      - "!scripts"
+      - "!build"
+      - "!vendor"
+      - "!资料"
+      - "!test-results"
+      - "!playwright-report"
+      - "!*.md"
+      - "!next.config.ts"
+      - "!next-env.d.ts"
+      - "!tsconfig.json"
+      - "!tsconfig.tsbuildinfo"
+      - "!eslint.config.mjs"
+      - "!postcss.config.mjs"
+      - "!playwright.config.ts"
+      - "!electron-builder.yml"
+      - "!components.json"
+      - "!package-lock.json"
+      - "!.editorconfig"
+  - from: .next/standalone/node_modules/
+    to: standalone/node_modules/
+    filter: ["**/*"]
+  # ⚠️ 不要再给 .next/node_modules 单独加 from:.next/standalone/.next/node_modules/ 一条。
+  # 上面第一条的 "**/*" 已经复制了 .next/node_modules(!node_modules 只命中顶层那个,
+  # 深层的 .next/node_modules 不受影响,external 模块如 require-in-the-middle /
+  # @anthropic-ai/claude-agent-sdk-<hash> 靠它进包)。再单独复制一次会重复,
+  # electron-builder 在输出目录第二次创建 @anthropic-ai/claude-agent-sdk 的 symlink
+  # 时报 "EEXIST: file already exists" → failedTask=build,dmg 不生成 —— 而且
+  # electron-builder 26.8.1 此时进程退出码仍是 0,极具欺骗性,务必以"是否真生成
+  # dmg"为准,不要只看退出码。(白名单时代第一条不复制 .next/node_modules,单独条目
+  # 才是必需的;切黑名单后它变成有害重复,故删除。)
+  #
+  # @playwright/mcp 整包(含嵌套 node_modules/playwright + playwright-core)从源
+  # node_modules 再显式复制一份,不依赖 Next.js NFT。
+  #
+  # 为什么必需:next.config.ts 的 outputFileTracingIncludes 里虽有
+  # 'node_modules/@playwright/mcp/**/*',但这条 glob 只在 macOS 构建里把嵌套的
+  # node_modules/playwright(54 个文件,含 cli.js)带进了 standalone;Windows 产物里
+  # 该嵌套目录缺失,导致 src/lib/test/script-runner.ts 的
+  # resolveScriptPlaywrightRuntime() 两个候选路径全部落空 → 抛「未找到 @playwright/mcp
+  # 自带的 Playwright 运行时」,「回归脚本生成后自动跑通」在 Windows 上必失败,而
+  # macOS 一切正常 —— 极易漏测。注意那两个候选在打包态实际指向同一处
+  # (AILAB_RESOURCES_PATH=process.resourcesPath,且 server.js 以
+  # cwd=<resources>/standalone 启动),没有任何容错余地,缺文件即直接报错。
+  #
+  # 依赖本身跨平台一致(package-lock.json 锁定嵌套条目,optional:false / os:any /
+  # cpu:any),所以问题只出在打包复制阶段;从源复制可绕开 NFT 的跨平台 glob 差异。
+  # 与上面 .next/standalone/node_modules/ 那条目标路径重叠属同内容覆盖:该包内无
+  # symlink(不同于 @anthropic-ai/claude-agent-sdk),不会触发上文警告的 EEXIST。
+  # ⚠️ 必须分两条:electron-builder 的 filter "**/*" 不会递归进 node_modules 子目录
+  # (与本文件 files: 段 "!node_modules" 的特殊语义一致)。只写下面第一条时,实测仅
+  # 补进了 @playwright/mcp/README.md 这个顶层文件,嵌套的 node_modules/playwright
+  # 一个文件都没复制 —— 而那恰恰是 Windows 缺、且 script-runner 唯一要找的东西。
+  # 故第二条显式指向嵌套 node_modules(其下子目录名为 playwright/playwright-core,
+  # 不再命中 node_modules 排除规则)。
+  # 自检指标:包内 .../@playwright/mcp/node_modules/playwright 应有 62 个文件
+  # (只靠 NFT 时是 54),且 cli.js 必须存在。
+  - from: node_modules/@playwright/mcp/
+    to: standalone/node_modules/@playwright/mcp/
+    filter: ["**/*"]
+  # ⚠️ 必须排除 .bin:node_modules/.bin/playwright 是指向 ../playwright/cli.js 的
+  # symlink,上面 .next/standalone/node_modules/ 那条已经创建过一次,这里再复制会报
+  # "EEXIST: file already exists, symlink ..." → failedTask=build、dmg 不生成,而
+  # electron-builder 26.8.1 退出码仍是 0(同本文件上方警告,务必以是否真生成 dmg 为准)。
+  # 排除它是安全的:script-runner.ts 用的是 <nested>/cli.js 的绝对路径 spawn,
+  # 从不经过 .bin;且 .bin 本身仍由 standalone 那条带进包。
+  # 注意 find -type f 统计不到 symlink,只看文件数会漏掉这个坑。
+  - from: node_modules/@playwright/mcp/node_modules/
+    to: standalone/node_modules/@playwright/mcp/node_modules/
+    filter:
+      - "**/*"
+      - "!.bin"
+      - "!.bin/**/*"
+  - from: .next/standalone/.next/
+    to: standalone/.next/
+    # 本条目现在独占 standalone/.next 子树(第一条已 !.next 防双写 EBUSY);
+    # nft.json 排除同步到这里 —— 运行时零引用,减包体(原先只排在第一条,漏了本条)。
+    filter:
+      - "**/*"
+      - "!**/*.nft.json"
+  - from: .next/static/
+    to: standalone/.next/static/
+    filter: ["**/*"]
+  - from: public/
+    to: standalone/public/
+    filter: ["**/*"]
+  - from: themes/
+    to: standalone/themes/
+    filter: ["*.json"]
+  - from: build/
+    to: .
+    filter: ["icon.*"]
+  # Login window static assets for the managed-account login system.
+  # Loaded by electron/auth/login-window.ts:getLoginHtmlPath() at runtime via
+  # path.join(process.resourcesPath, 'login', 'index.html') in packaged mode.
+  - from: electron/login/
+    to: login/
+    filter: ["**/*"]
+  # 获取登录态抓取窗口的工具条静态资源。由
+  # electron/test-auth-capture/capture-window.ts:getToolbarHtmlPath() 在打包模式下经
+  # path.join(process.resourcesPath, 'test-auth-capture', 'toolbar.html') 加载。
+  # ⚠️ 只复制静态资源 —— 不要用 **/*，否则会把 capture-window.ts 源码一并打进 Resources。
+  - from: electron/test-auth-capture/
+    to: test-auth-capture/
+    filter: ["*.html", "*.css", "*.js"]
+  # GSD 残留清理清单（静态产物，随库提交）。内置 GSD 插件已下线，但历史版本往
+  # ~/.claude/ 镜像过 399 个文件；electron/gsd-purge.ts 首次启动时读这份清单把它们
+  # 精确清掉。⚠️ 这是单个文件不是目录 —— extraResources 对不存在的 from 是静默跳过，
+  # 删错路径不会报错，只会让老用户永远清不干净。
+  - from: vendor/gsd-purge-manifest.json
+    to: gsd-purge-manifest.json
+  # Playwright headless_shell —— 由 scripts/bundle-chromium.mjs 在 electron-builder
+  # 之前装到 ms-playwright-bundle/(当前打包平台的二进制)。测试执行阶段的 MCP server
+  # (src/lib/test/prompts.ts buildPlaywrightMcp)运行时经 AILAB_RESOURCES_PATH/ms-playwright
+  # 定位 chrome-headless-shell 并用 --executable-path 启动。
+  - from: ms-playwright-bundle/
+    to: ms-playwright/
+    filter:
+      - "**/*"
+  # Vendor-bundled AI_LabTest plugin — generated by `npm run vendor:ailab`.
+  # Loaded by electron/ailab-installer.ts: copies into
+  # ~/.claude/plugins/external_plugins/codepilot-ailab-vendor/ and, while
+  # enabled, mirrors commands into ~/.claude/commands/ai-lab-test/ (namespace
+  # ai-lab-test:*) + the skill into ~/.claude/skills/test-workflow/.
+  - from: vendor/ailab-bundle/
+    to: ailab-bundle/
+    filter:
+      - "**/*"
+      - "!transform-report.json"
+  # Cowork 沙箱运行时资源(镜像流水线 M3)—— guest daemon + vsock 转发器。
+  # 运行时由 src/lib/cowork-paths.ts bundledCoworkResource() 经
+  # AILAB_RESOURCES_PATH/cowork/ 定位(打包版脱离仓库绝对路径依赖的关键)。
+  - from: scripts/poc/cowork/
+    to: cowork/
+    filter:
+      - "cowork-daemon.py"
+      - "forwarder-vsock.sh"
+      - "forwarder-vsock.mjs"
+  # R5-1:远程容器沙箱 WS 转发器(cowork-backend-remote.ts remoteForwarderPath 的
+  # 打包版第一候选;SDK 对 .mjs 走 JS 运行时 spawn + ELECTRON_RUN_AS_NODE)。
+  - from: apps/cowork-server/client/
+    to: cowork/
+    filter:
+      - "forwarder-remote.mjs"
+  # forwarder 唯一依赖 ws(零运行时依赖,MIT,~192K)整包拷成 cowork/node_modules/ws,
+  # ESM 从脚本所在目录向上解析即命中。不能换 Node 内置 WebSocket:握手需自定义
+  # authorization Bearer 头,内置(undici)实现不支持。bufferutil/utf-8-validate 为
+  # 可选原生加速,ws 内部 try/catch 缺省走纯 JS,不拷。
+  - from: node_modules/ws/
+    to: cowork/node_modules/ws/
+    filter:
+      - "**/*"
+  # vfkit 虚拟机监视器(Apache-2.0,crc-org/vfkit)—— scripts/bundle-vfkit.mjs
+  # 在 electron:build 阶段从本机 brew 拷入 vfkit-bundle/(强校验
+  # com.apple.security.virtualization entitlement)。after-sign.js 的 adhoc 补签
+  # 按扩展名收集,不会碰这个无扩展名二进制,原签名与 entitlement 保留。
+  - from: vfkit-bundle/
+    to: cowork/bin/
+    filter: ["vfkit"]
+afterPack: scripts/after-pack.js
+afterSign: scripts/after-sign.js
+asarUnpack:
+  - "**/*.node"
+  - "**/better-sqlite3/**"
+  # @anthropic-ai/claude-agent-sdk-<platform>-<arch> ships a Bun-compiled native
+  # binary (claude / claude.exe, ~230 MB). It must be unpacked from app.asar so
+  # child_process.spawn can execute it — binaries inside asar archives are not
+  # executable in place. SDK auto-discovers the platform-specific subpackage at
+  # runtime via require.resolve, which works fine through asarUnpack.
+  - "**/@anthropic-ai/claude-agent-sdk-*/**"
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  # 语音输入需要麦克风用途说明，缺这条调用麦克风会直接崩溃（Apple 强制）。
+  extendInfo:
+    NSMicrophoneUsageDescription: "AI Native Lab 需要使用麦克风，以支持语音输入（将你的说话实时转写为文字）。"
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  notarize: false
+  # vfkit 必须跳过 electron-builder 的签名:它会用 Electron 默认 entitlements
+  # 重签(只剩 allow-jit),剥掉 Virtualization.framework 硬要求的
+  # com.apple.security.virtualization → 沙箱 VM 起不来(M3 实测踩坑)。
+  # 跳过后保留 brew 原签名与 entitlement;after-sign.js 有防回归校验。
+  signIgnore:
+    - "cowork/bin/vfkit$"
+  # Only Apple Silicon — Intel Macs are no longer targeted (drops the need to
+  # cross-install the darwin-x64 SDK platform subpackage in CI and halves the
+  # release artifact size for macOS).
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+win:
+  icon: build/icon.ico
+  # CI 无证书,electron-builder 默认仍对产物内每个 exe 逐个调 signtool(含
+  # ms-playwright bundle 的 PrintDeps/ffmpeg/headless-shell),且与 extraResources
+  # 大树复制并发 —— Windows runner 四连 EBUSY copyfile 竞态实测(每次锁不同文件,
+  # Defender 排除/文件类排除均无效)。no-op 钩子移除全部 signtool 活动消除并发窗口。
+  # 注意:electron-builder 26.x 起自定义签名钩子在 signtoolOptions.sign(旧顶层
+  # win.sign 已从 schema 移除,写错会 Invalid configuration object 直接失败)。
+  signtoolOptions:
+    sign: ./scripts/noop-sign.cjs
+  # Only x64 — arm64 is no longer targeted (most Windows users are x64; drops
+  # the need to cross-install win32-arm64 SDK platform subpackage in CI).
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false                  # Per-user install → no admin/UAC required
+  packElevateHelper: false           # No elevate.exe needed since perMachine=false; explicit guarantee no UAC prompt
+  # Show the "Choose Install Location" page in the NSIS wizard so users can
+  # pick where AI Native Lab installs. Default install dir is still per-user
+  # (%LOCALAPPDATA%\Programs\AI Native Lab) — if the user picks Program Files,
+  # NSIS will fail the write because perMachine=false runs without elevation;
+  # they should pick a writable per-user path.
+  allowToChangeInstallationDirectory: true
+  # Custom NSIS include (build/installer.nsh): on auto-update (installer launched
+  # with --updated → ${isUpdated}) force per-user and skip the install-mode page
+  # so updates go straight to the visible progress with zero clicks, while manual
+  # installs keep the full wizard. See electron/updater/installer.ts.
+  include: build/installer.nsh
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  artifactName: "${productName}.Setup.${version}.${ext}"
+linux:
+  icon: build/icon.png
+  category: Development
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  desktop:
+    entry:
+      Name: AI Native Lab
+      Comment: A native desktop GUI for Claude Code
+      Categories: Development;IDE;
+      StartupWMClass: codepilot
+  # arch is NOT specified here — controlled by CI via --x64 / --arm64 CLI flags.
+  # Listing both arches here causes electron-builder to build both on every job,
+  # which fails when cross-compiling native modules (zlib-sync -m64 on arm64).
+  target:
+    - AppImage
+    - deb
+    - rpm

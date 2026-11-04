@@ -1,0 +1,1000 @@
+import {cardsFlow} from '../ppt-flow.mjs';
+import {readTemplatePictures} from '../ppt-template-picture-read.mjs';
+import {POINT_CARDS_SCRIPT} from '../ppt-point-cards-python.mjs';
+import {NATIVE_SHAPE_IDS_SCRIPT} from '../ppt-native-shape-ids.mjs';
+import {buildRenderTree} from './render-tree.mjs';
+import {fitNativeTextFrames,fitSourceMathFrames} from '../ppt-native-text-fit.mjs';
+import {SOURCE_MATH_SCRIPT} from '../ppt-source-math-python.mjs';
+import { titleFromNativeShapes } from '../ppt-editorial-review.mjs';
+import { EXPORT_VERIFY_SCRIPT } from './export-verifier-python.mjs';
+import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
+import { OFFICE_MATH_SCRIPT } from '../ppt-math.mjs';
+import { exportManifest } from '../ppt-export-integrity.mjs';
+import { THEME_SCRIPT } from '../ppt-theme.mjs';
+import { textContract, imageContract, chartContract } from './render-contract.mjs';
+import {surfaceFill} from './surface-fill.mjs';
+import { RENDER_CONTRACT_SCRIPT, NATIVE_CHART_CONTRACT_SCRIPT } from './render-contract-python.mjs';
+import { FONT_SCRIPT, EMBEDDED_FONT_SCRIPT } from '../ppt-fonts.mjs';
+import { spawn } from 'node:child_process';
+import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
+import { layoutPictureImages } from '../ppt-layout-pictures.mjs';
+import * as orch from '../orchestrator.mjs';
+import { ensureDeckV3, stableId } from './ir.mjs';
+
+const IMPORT_SCRIPT = String.raw`
+import base64, io, json, os, sys
+${EMBEDDED_FONT_SCRIPT}
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_SHAPE
+from pptx.enum.dml import MSO_COLOR_TYPE
+from pptx.oxml.ns import qn
+${THEME_SCRIPT}
+${OFFICE_MATH_SCRIPT}
+${SOURCE_MATH_SCRIPT}
+${NATIVE_SHAPE_IDS_SCRIPT}
+media_warnings=[]
+# A run's size, typeface and weight as PowerPoint shows them: the run, else
+# the shape's list style, its layout and master placeholders, the master's
+# title/body/other text style and the presentation default (live GPH-GU2353:
+# a Google Slides title set only on the master, 28 pt Montserrat ExtraBold,
+# was measured at the 18 pt default and overflowed).
+INHERIT_A='{http://schemas.openxmlformats.org/drawingml/2006/main}'
+INHERIT_P='{http://schemas.openxmlformats.org/presentationml/2006/main}'
+def inherit_props(element,slide=None):
+    out={}
+    if element is None:return out
+    if element.get('sz'):out['size']=int(element.get('sz'))/100
+    if element.get('b') is not None:out['bold']=element.get('b') in ('1','true')
+    if slide is not None:
+        color=effective_color(element,slide)
+        if color:out['color']='#'+color.lower()
+    latin=element.find(INHERIT_A+'latin')
+    if latin is not None and latin.get('typeface') and not latin.get('typeface').startswith('+'):out['family']=latin.get('typeface')
+    return out
+def inherit_level(style,level):
+    if style is None:return None
+    entry=style.find(INHERIT_A+'lvl%dpPr'%(level+1))
+    return entry.find(INHERIT_A+'defRPr') if entry is not None else None
+def inherited_styles(slide,shape):
+    styles=[shape._element.find('.//'+INHERIT_A+'lstStyle')]
+    kind=None
+    if shape.is_placeholder:
+        kind=str(shape.placeholder_format.type)
+        base=getattr(shape,'_base_placeholder',None)
+        while base is not None:
+            styles.append(base._element.find('.//'+INHERIT_A+'lstStyle'));base=getattr(base,'_base_placeholder',None)
+    master=slide.slide_layout.slide_master._element.find(INHERIT_P+'txStyles')
+    name='titleStyle' if kind and 'TITLE' in kind and 'SUB' not in kind else 'bodyStyle' if kind else 'otherStyle'
+    if master is not None:styles.append(master.find(INHERIT_P+name))
+    styles.append(prs.part._element.find(INHERIT_P+'defaultTextStyle'))
+    return styles
+def effective_run(slide,shape,paragraph,run):
+    found=inherit_props(run._r.find(INHERIT_A+'rPr'),slide)
+    ppr=paragraph._p.find(INHERIT_A+'pPr')
+    for key,value in inherit_props(ppr.find(INHERIT_A+'defRPr') if ppr is not None else None,slide).items():found.setdefault(key,value)
+    for style in inherited_styles(slide,shape):
+        for key,value in inherit_props(inherit_level(style,paragraph.level),slide).items():found.setdefault(key,value)
+    return found
+def image_text(blob,area_share,always=False):
+    # A kept decorative picture can carry old text (a background printed with
+    # a title or numbers). Slide pictures of 5% of the slide or more are read,
+    # master/layout pictures at any size since every page shows them (a "Made
+    # with GAMMA" badge is 0.3%); words of 3+ letters and digit runs count at
+    # confidence 70 or more.
+    if area_share<.05 and not always:return None
+    import shutil,subprocess,tempfile,csv as ocr_csv,re as ocr_re
+    if not shutil.which('tesseract'):return {'status':'unavailable'}
+    try:
+        from PIL import Image as OcrImage
+        with tempfile.TemporaryDirectory() as directory:
+            picture=OcrImage.open(io.BytesIO(blob)).convert('RGB')
+            # A small badge is upscaled so its letters are large enough to read.
+            if 0<picture.height<120:picture=picture.resize((max(1,round(picture.width*120/picture.height)),120))
+            path=os.path.join(directory,'image.png');picture.save(path)
+            installed=subprocess.run(['tesseract','--list-langs'],capture_output=True,text=True,timeout=10).stdout.splitlines()
+            language='+'.join(l for l in ('eng','chi_sim','chi_tra') if l in installed) or 'eng'
+            result=subprocess.run(['tesseract',path,'stdout','-l',language,'--psm','11','tsv'],capture_output=True,text=True,timeout=60)
+            if result.returncode:return {'status':'failed'}
+            words=[row['text'].strip() for row in ocr_csv.DictReader(io.StringIO(result.stdout),delimiter='\t') if row.get('level')=='5' and (row.get('text') or '').strip() and float(row.get('conf') or -1)>=70]
+    except Exception:return {'status':'failed'}
+    # Any word of two or more letters in any script ("HP", Arabic) keeps the
+    # picture from certification: no read text is no proof of none.
+    return {'status':'ok','words':sum(1 for w in words if len(ocr_re.sub(r'[^A-Za-z\u3400-\u9fff]','',w))>=3),'lettered':sum(1 for w in words if sum(ch.isalpha() for ch in w)>=2),'digitRun':any(ocr_re.search(r'\d{2,}',w) for w in words),'sample':' '.join(words)[:120]}
+def image_pixels(blob,area_share,always=False):
+    # Layer C of the template picture readers (Fable, 2026-11-02): a continuous-tone
+    # picture (a photo or a painting) has almost no flat 8x8 blocks, no dominant
+    # colours and no long straight edges; a chart, UI, diagram or flat artwork
+    # fails at least one. Pixels alone never certify a picture: OCR or the vision
+    # reader must also find no text. Without OCR a downscaled copy (at most 1024
+    # px) is attached for the server's tesseract.js reader.
+    if area_share<.005 and not always:return None
+    import shutil
+    try:
+        from PIL import Image as PixelImage
+        picture=PixelImage.open(io.BytesIO(blob)).convert('RGB')
+        small=picture.copy();small.thumbnail((256,256));w,h=small.size
+        gray=small.convert('L');px=gray.load()
+        flat=total=0
+        for by in range(0,h-7,8):
+            for bx in range(0,w-7,8):
+                values=[px[bx+i,by+j] for i in range(8) for j in range(8)];total+=1
+                if max(values)-min(values)<6:flat+=1
+        def straight(horizontal):
+            count=0;span=w if horizontal else h;other=h if horizontal else w
+            for k in range(1,other):
+                run=best=0
+                for t in range(span):
+                    a=px[t,k] if horizontal else px[k,t];b=px[t,k-1] if horizontal else px[k-1,t]
+                    run=run+1 if abs(a-b)>24 else 0;best=max(best,run)
+                if best>=.4*span:count+=1
+            return count
+        edges=straight(True)+straight(False)
+        quantised=small.quantize(32);counts=sorted((c for c,_ in quantised.getcolors()),reverse=True)
+        top4=sum(counts[:4])/max(1,sum(counts));flat_share=flat/max(1,total)
+        result={'flat':round(flat_share,3),'top4':round(top4,3),'edges':edges,'continuousTone':flat_share<.15 and top4<.35 and edges<2}
+        if not shutil.which('tesseract') and (area_share>=.05 or always):
+            copy=picture.copy()
+            if max(copy.size)>1024:copy.thumbnail((1024,1024))
+            buffer=io.BytesIO();copy.save(buffer,'PNG');result['ocrImage']='data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode()
+        return result
+    except Exception:return {'status':'failed'}
+def picture_link(shape):
+    # A picture that links out (a "Made with" badge, a logo to a website) is
+    # attribution or brand of the old deck, not decoration.
+    try:
+        address=shape.click_action.hyperlink.address
+    except Exception:return None
+    import re as link_re
+    return address if address and link_re.match(r'^(?:https?:|mailto:|www\.)',address,link_re.I) else None
+${NATIVE_CHART_CONTRACT_SCRIPT}
+raw=sys.stdin.buffer.read(); ext='pptx'
+${TEMPLATE_SECURITY_SCRIPT}
+prs=Presentation(io.BytesIO(raw)); native_ids=normalize_native_shape_ids(prs); slides=[]
+target=os.path.join(os.environ.get('PPT_EXTERNAL_DIR','/workspace/external'),'original.pptx'); os.makedirs(os.path.dirname(target), exist_ok=True)
+with open(target+'.part','wb') as f: f.write(raw)
+os.replace(target+'.part',target)
+for slide_index, slide in enumerate(prs.slides):
+    shapes=[]
+    for z_index, shape in enumerate(slide.shapes):
+        item={'shapeId': int(shape.shape_id), 'name': shape.name, 'x': int(shape.left), 'y': int(shape.top), 'width': int(shape.width), 'height': int(shape.height), 'kind':'foreign', 'locked':True, 'zIndex':z_index,'rotation':float(shape.rotation), 'shapeType':str(shape.shape_type)}
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+            try: item['autoShapeType']=str(shape.auto_shape_type)
+            except (AttributeError,TypeError,ValueError): pass
+            geom=shape._element.find('.//'+qn('a:prstGeom'))
+            if geom is not None:
+                item['presetGeometry']=geom.get('prst')
+                # The corner radius of a rounded rectangle (OOXML adj, 1/100000 of the shorter side).
+                adjust=geom.find(qn('a:avLst')+'/'+qn('a:gd'))
+                if adjust is not None and (adjust.get('fmla') or '').startswith('val '):
+                    try:item['presetAdjust']=int(adjust.get('fmla').split()[1])
+                    except ValueError:pass
+        paint=effective_color(shape._element.find(qn('p:spPr')+'/'+qn('a:solidFill')),slide)
+        if paint:item['fill']='#'+paint.lower()
+        line=shape._element.find('.//'+qn('a:ln'))
+        line_color=effective_color(line,slide)
+        if line_color is None:line_color=effective_color(shape._element.find(qn('p:style')+'/'+qn('a:lnRef')),slide)
+        if line_color:item['lineColor']='#'+line_color.lower()
+        try:
+            if shape.fill.type and shape.fill.fore_color.type == MSO_COLOR_TYPE.RGB:
+                item['fill']='#'+str(shape.fill.fore_color.rgb).lower()
+        except (AttributeError,TypeError,ValueError): pass
+        if shape.has_text_frame and rich_visible_text(shape._element).strip():
+            item.update({'kind':'text','locked':False,'text':rich_visible_text(shape._element),'nativeMath':bool(shape._element.findall('.//'+qn('m:oMath'))),'isTitle': bool(slide.shapes.title is shape)})
+            frame=shape.text_frame
+            item['textFrame']={'wordWrap':frame.word_wrap,'autoSize':str(frame.auto_size) if frame.auto_size is not None else None,
+                'margins':[int(frame.margin_left),int(frame.margin_top),int(frame.margin_right),int(frame.margin_bottom)],
+                'paragraphs':[{'text':rich_visible_text(paragraph._p),'level':paragraph.level,
+                    'lineSpacing':(round(float(paragraph.line_spacing),3) if isinstance(paragraph.line_spacing,float)
+                        else round(paragraph.line_spacing.pt / max(1, next((run.font.size.pt for run in paragraph.runs if run.font.size), 18)),3)
+                        if paragraph.line_spacing is not None else None),
+                    'spaceAfterPt':round(paragraph.space_after.pt,2) if paragraph.space_after is not None else None,
+                    'bulletChar':(paragraph._p.pPr.find(qn('a:buChar')).get('char') if paragraph._p.pPr is not None and paragraph._p.pPr.find(qn('a:buChar')) is not None else None),
+                    'runs':[{'text':run.text,'fontSizePt':round(run.font.size.pt,2) if run.font.size else effective_run(slide,shape,paragraph,run).get('size'),
+                        'fontFamily':run.font.name or effective_run(slide,shape,paragraph,run).get('family'),'bold':run.font.bold if run.font.bold is not None else effective_run(slide,shape,paragraph,run).get('bold'),'italic':run.font.italic,'underline':run.font.underline,'href':run.hyperlink.address,
+                        'color':effective_run(slide,shape,paragraph,run).get('color')} for run in paragraph.runs]}
+                    for paragraph in frame.paragraphs]}
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if run.text.strip():
+                        inherited=effective_run(slide,shape,paragraph,run)
+                        if inherited.get('color'):item['color']=inherited['color']
+                        if run.font.name or inherited.get('family'): item['fontFamily']=run.font.name or inherited['family']
+                        if run.font.size: item['fontSizePt']=round(run.font.size.pt,2)
+                        elif inherited.get('size'): item['fontSizePt']=round(inherited['size'],2)
+                        if run.font.bold is not None: item['bold']=bool(run.font.bold)
+                        elif inherited.get('bold') is not None: item['bold']=bool(inherited['bold'])
+                        if run.font.italic is not None: item['italic']=bool(run.font.italic)
+                        try:
+                            for child in run._r.get_or_add_rPr():
+                                if child.tag.endswith('}ea') and child.get('typeface'):
+                                    family=child.get('typeface'); lowered=family.lower()
+                                    if any(marker in lowered for marker in ('cjk','source han','yahei','simhei','simsun','dengxian','jhenghei','mingliu','heiti','songti','hiragino','yu gothic','meiryo')) or any(marker in family for marker in ('等线','微软雅黑','宋体','黑体','苹方','華文','新細明體','微軟正黑體')):
+                                        item['eastAsiaFontFamily']=family
+                                    break
+                        except (AttributeError,TypeError,ValueError): pass
+                        try:
+                            if run.font.color.type == MSO_COLOR_TYPE.RGB: item['color']='#'+str(run.font.color.rgb).lower()
+                        except (AttributeError,TypeError,ValueError): pass
+                        break
+                if 'fontSizePt' in item: break
+        elif shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+            item.update({'kind':'shape','locked':True})
+        elif shape.has_table:
+            item.update({'kind':'table','rows':[[rich_visible_text(cell._tc) for cell in row.cells] for row in shape.table.rows],'columnWeights':[int(col.width) for col in shape.table.columns],'rowWeights':[int(row.height) for row in shape.table.rows], 'locked':True})
+        elif shape.has_chart:
+            chart=shape.chart
+            item.update({'kind':'chart','locked':True,'chartContent':{'labels':[str(c.label) for c in chart.plots[0].categories], 'values':list(chart.series[0].values) if chart.series else [],'series':[{'name':series.name,'values':list(series.values)} for series in chart.series], 'nativeChartType':str(chart.chart_type),'chartType':{'PIE':'pie','LINE':'line','LINE_MARKERS':'line','COLUMN_CLUSTERED':'bar','BAR_CLUSTERED':'bar'}.get(str(chart.chart_type).split(' ')[0],'unsupported'),'nativeChartStructureSha256':native_chart_structure_hash(chart),'nativeChartSha256':__import__('hashlib').sha256(chart.part.blob).hexdigest()}})
+        elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            image=shape.image
+            subtype={'jpg':'jpeg','jpeg':'jpeg','png':'png','gif':'gif','svg':'svg+xml','webp':'webp'}.get(image.ext.lower())
+            image_dhash=None; monochrome_panel=False;foreground_color=None;panel_color=None;empty_frame=False
+            try:
+                from PIL import Image, ImageStat
+                decoded=Image.open(io.BytesIO(image.blob)); decoded.load()
+                rgb=decoded.convert('RGBA');middle=rgb.crop((int(rgb.width*.12),int(rgb.height*.12),int(rgb.width*.88),int(rgb.height*.88)))
+                interior=ImageStat.Stat(middle);whole=ImageStat.Stat(rgb)
+                empty_frame=min(rgb.size)>=40 and (interior.extrema[3][1]<=5 or max(interior.stddev[:3])<2 and interior.extrema[3][0]>=250) and max(whole.stddev)>8
+                deep=ImageStat.Stat(rgb.crop((int(rgb.width*.2),int(rgb.height*.2),int(rgb.width*.8),int(rgb.height*.8))));cap=ImageStat.Stat(rgb.crop((int(rgb.width*.1),int(rgb.height*.02),int(rgb.width*.9),int(rgb.height*.08))))
+                empty_frame=empty_frame or (rgb.width>=rgb.height*1.5 and min(rgb.size)>=40 and max(deep.stddev[:3])<2 and deep.extrema[3][0]>=250 and max(abs(deep.mean[c]-cap.mean[c]) for c in range(3))>40 and max(cap.stddev[:3])<8)
+                sample=decoded.convert('L').resize((9,8))
+                if image.ext.lower()=='png':
+                    rgba=decoded.convert('RGBA'); mask=rgba.getchannel('A').point(lambda a:255 if a>=128 else 0)
+                    extrema=ImageStat.Stat(rgba.convert('RGB'),mask).extrema
+                    monochrome_panel=bool(mask.getbbox()) and all(hi-lo<=2 for lo,hi in extrema)
+                    if monochrome_panel and sum(mask.getdata())/(255*rgba.width*rgba.height)>=.99:panel_color='#'+''.join('%02x'%round(v) for v in ImageStat.Stat(rgba.convert('RGB'),mask).mean)
+                    if monochrome_panel and sum(mask.getdata())/(255*rgba.width*rgba.height)<.9:foreground_color='#'+''.join('%02x'%round(v) for v in ImageStat.Stat(rgba.convert('RGB'),mask).mean)
+                pixels=list(sample.getdata())
+                bits=0
+                for row in range(8):
+                    for column in range(8): bits=(bits<<1) | int(pixels[row*9+column]>pixels[row*9+column+1])
+                image_dhash=format(bits,'016x')
+            except Exception: pass
+            ocr=image_text(image.blob,int(shape.width)*int(shape.height)/max(1,int(prs.slide_width)*int(prs.slide_height)))
+            if ocr:item['ocr']=ocr
+            pixels_read=image_pixels(image.blob,int(shape.width)*int(shape.height)/max(1,int(prs.slide_width)*int(prs.slide_height)))
+            if pixels_read:item['pixels']=pixels_read
+            href=picture_link(shape)
+            if href:item['href']=href
+            item.update({'kind':'image','dataUrl':('data:image/'+subtype+';base64,'+base64.b64encode(image.blob).decode()) if subtype else None,
+                         'locked':True,'crop':[shape.crop_left,shape.crop_top,shape.crop_right,shape.crop_bottom],
+                         'imageSha256':__import__('hashlib').sha256(image.blob).hexdigest(),'imageDhash':image_dhash,'monochromePanel':monochrome_panel,'panelColor':panel_color,'foregroundColor':foreground_color,'emptyContentFrame':empty_frame})
+        if item['kind']=='image':
+            geometry=shape._element.find('.//'+qn('a:prstGeom'))
+            if geometry is None:geometry=shape._element.find('.//'+qn('a:custGeom'))
+            if geometry is not None:item['maskXml']=geometry.xml
+        if item['kind']=='foreign':
+            item['xmlHash']=__import__('hashlib').sha256(shape._element.xml.encode()).hexdigest()
+            def media_hashes(shapes):
+                result=[]
+                for nested in shapes:
+                    if hasattr(nested,'image'):result.append(__import__('hashlib').sha256(nested.image.blob).hexdigest())
+                    if hasattr(nested,'shapes'):result.extend(media_hashes(nested.shapes))
+                return result
+            item['nestedMediaHashes']=media_hashes(shape.shapes) if hasattr(shape,'shapes') else []
+        if shape._element.findall('.//'+qn('m:oMath')):
+            from lxml import etree as import_xml
+            item['nativeRawText']=source_formula_text(shape._element,'Imported formula')
+            item['nativeMathStructures']=[import_xml.tostring(v,encoding='unicode') for v in shape._element.findall('.//'+qn('m:oMath'))]
+        shapes.append(item)
+    background=None
+    try:
+        if slide.background.fill.type and slide.background.fill.fore_color.type == MSO_COLOR_TYPE.RGB:
+            background='#'+str(slide.background.fill.fore_color.rgb).lower()
+    except (AttributeError,TypeError,ValueError): pass
+    background,bg_basis=effective_background(slide,int(prs.slide_width),int(prs.slide_height))
+    slides.append({'index':slide_index,'shapes':shapes,'background':'#'+background.lower(),'backgroundBasis':bg_basis})
+# Masters and layouts paint every slide that uses them, but are not slide
+# shapes: list their text and pictures so a design-only reuse can clear them
+# and a user can choose to keep them (3143: a master footer reached exports).
+inherited=[];layout_refs={}
+def literal_text(element):
+    # Text other than a page-number field: runs, and fields such as a date that
+    # keep the old deck's cached value.
+    return ''.join(node.text or '' for run in element.iter() if run.tag==qn('a:r') or run.tag==qn('a:fld') and run.get('type')!='slidenum' for node in run.iter(qn('a:t')))
+def inherited_items(scope,master_index,layout_index,shapes):
+    import hashlib
+    for z_order,shape in enumerate(shapes):
+        placeholder=str(shape.placeholder_format.type) if shape.is_placeholder else ''
+        if shape.is_placeholder and not any(kind in placeholder for kind in ('FOOTER','DATE')):continue
+        item={'key':'inherited:%s:%d:%d:%d'%(scope,master_index,layout_index,int(shape.shape_id)),'scope':scope,'masterIndex':master_index,'layoutIndex':layout_index,
+              'shapeId':int(shape.shape_id),'name':shape.name,'x':int(shape.left or 0),'y':int(shape.top or 0),'width':int(shape.width or 0),'height':int(shape.height or 0),'placeholder':placeholder or None,'z':z_order}
+        if shape.shape_type==MSO_SHAPE_TYPE.PICTURE:
+            image=shape.image;subtype={'png':'png','jpg':'jpeg','jpeg':'jpeg','gif':'gif'}.get(image.ext.lower())
+            item.update({'kind':'image','imageSha256':hashlib.sha256(image.blob).hexdigest(),'dataUrl':('data:image/'+subtype+';base64,'+base64.b64encode(image.blob).decode()) if subtype else None})
+            ocr=image_text(image.blob,int(shape.width or 0)*int(shape.height or 0)/max(1,int(prs.slide_width)*int(prs.slide_height)),True)
+            if ocr:item['ocr']=ocr
+            pixels_read=image_pixels(image.blob,int(shape.width or 0)*int(shape.height or 0)/max(1,int(prs.slide_width)*int(prs.slide_height)),True)
+            if pixels_read:item['pixels']=pixels_read
+            href=picture_link(shape)
+            if href:item['href']=href
+        # A full-bleed colour layer (Mood-Board's beige over its dark texture,
+        # Portfolio's 10% navy tint over the cover photo) decides which layout
+        # picture is visible (Fable G1): its colour and opacity, no action.
+        # Gradient and pattern fills are colour layers too (Fable 2026-11-02): a
+        # gradient's opacity is its most transparent stop; a pattern covers.
+        elif not literal_text(shape._element).strip() and int(shape.width or 0)*int(shape.height or 0)>=.25*int(prs.slide_width)*int(prs.slide_height) and any(shape._element.find('.//'+qn('p:spPr')+'/'+qn('a:'+kind)) is not None for kind in ('solidFill','gradFill','pattFill')):
+            spPr=shape._element.find('.//'+qn('p:spPr'))
+            def stop_alpha(node):
+                alpha=node.find('.//'+qn('a:alpha'))
+                return int(alpha.get('val'))/100000 if alpha is not None else 1.0
+            if spPr.find(qn('a:solidFill')) is not None:
+                colour=spPr.find(qn('a:solidFill')).find(qn('a:srgbClr'))
+                if colour is None:continue
+                item.update({'kind':'fill','fill':'#'+colour.get('val','000000').lower(),'opacity':round(stop_alpha(colour),3)})
+            elif spPr.find(qn('a:gradFill')) is not None:
+                stops=[stop for stop in spPr.find(qn('a:gradFill')).iter(qn('a:gs'))]
+                colours=[stop.find(qn('a:srgbClr')) for stop in stops];colours=[c for c in colours if c is not None]
+                item.update({'kind':'fill','fillType':'gradient','fill':'#'+(colours[0].get('val','000000').lower() if colours else '000000'),'opacity':round(min([stop_alpha(c) for c in colours] or [1.0]),3)})
+            else:item.update({'kind':'fill','fillType':'pattern','fill':'#000000','opacity':1.0})
+        # A page-number field ("‹#›") numbers the new deck's pages, it is not old
+        # content (the user's GPH-GU2353 deck: its layout page numbers would
+        # have been cleared).
+        elif getattr(shape,'has_text_frame',False) and literal_text(shape._element).strip():
+            item.update({'kind':'text','text':literal_text(shape._element)[:500]})
+        else:continue
+        inherited.append(item)
+for master_index,master in enumerate(prs.slide_masters):
+    inherited_items('master',master_index,-1,master.shapes)
+    for layout_index,layout in enumerate(master.slide_layouts):
+        layout_refs[id(layout._element)]={'masterIndex':master_index,'layoutIndex':layout_index}
+        inherited_items('layout',master_index,layout_index,layout.shapes)
+for slide_index,slide in enumerate(prs.slides):
+    if slide_index<len(slides):slides[slide_index]['layoutRef']=layout_refs.get(id(slide.slide_layout._element))
+print(json.dumps({'width':int(prs.slide_width),'height':int(prs.slide_height),'slides':slides,'path':target,'nativeIdNormalization':native_ids,'inherited':inherited,'compressedFonts':compressed_embedded_fonts(raw)},ensure_ascii=False))
+`;
+
+const EXPORT_SCRIPT = String.raw`
+import base64, copy, hashlib, io, json, os, re, sys
+from pptx import Presentation
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import qn
+from pptx.util import Pt, Inches
+from pptx.dml.color import RGBColor
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_SHAPE
+
+${OFFICE_MATH_SCRIPT}
+${EXPORT_VERIFY_SCRIPT}
+${FONT_SCRIPT}
+${RENDER_CONTRACT_SCRIPT}
+${POINT_CARDS_SCRIPT}
+${NATIVE_SHAPE_IDS_SCRIPT}
+
+data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
+def apply_inherited(actions):
+    # Design-only reuse clears an old master/layout text (keeping the shape)
+    # and removes an old picture; kept objects carry no action.
+    owners={}
+    for master_index,master in enumerate(prs.slide_masters):
+        owners[('master',master_index,-1)]=master
+        for layout_index,layout in enumerate(master.slide_layouts):owners[('layout',master_index,layout_index)]=layout
+    for action in actions or []:
+        owner=owners.get((action['scope'],action['masterIndex'],action['layoutIndex']))
+        if owner is None:continue
+        for shape in list(owner.shapes):
+            if int(shape.shape_id)!=int(action['shapeId']):continue
+            element=shape._element
+            if action['action']=='remove':
+                # The removed picture's image and hyperlink relationships go
+                # too, unless another object of this master/layout uses them.
+                relationship_ns='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+                ids={value for node in element.iter() for key,value in node.attrib.items() if key.startswith(relationship_ns)}
+                element.getparent().remove(element)
+                used={value for node in owner._element.iter() for key,value in node.attrib.items() if key.startswith(relationship_ns)}
+                for rid in ids-used:
+                    if rid in owner.part.rels:owner.part.rels.pop(rid)
+            elif action['action']=='clear_text':
+                for paragraph in element.iter(qn('a:p')):
+                    for child in list(paragraph):
+                        # A page-number field stays: it numbers this deck's pages.
+                        if child.tag in (qn('a:r'),qn('a:br')) or child.tag==qn('a:fld') and child.get('type')!='slidenum':paragraph.remove(child)
+apply_inherited(data.get('inheritedActions'))
+# Card decks already have canonical page-number nodes. Inherited dynamic
+# fields are invisible to the slide IR and otherwise paint a second footer.
+# Remove only those fields; dates, brands and ordinary imported decks stay.
+if data.get('canonicalPageNumbers'):
+    for master in prs.slide_masters:
+        for owner in [master,*master.slide_layouts]:
+            for field in list(owner._element.iter(qn('a:fld'))):
+                if field.get('type')=='slidenum':field.getparent().remove(field)
+
+if data.get('nativeIdNormalization'):
+    normalized=normalize_native_shape_ids(prs)
+    if normalized!=data['nativeIdNormalization']:raise ValueError('native_shape_id_normalization_mismatch: source or normalization contract changed')
+if data.get('clearTemplateNotes'):
+    for slide in prs.slides:
+        for relationship in list(slide.part.rels.values()):
+            if relationship.reltype.endswith('/notesSlide'): slide.part.drop_rel(relationship.rId)
+if data.get('title') is not None:prs.core_properties.title=str(data['title'])
+os.environ.update(office_font_environment(os.path.join(os.path.dirname(original),'.template-font-runtime'),original))
+source_slide_map=data.get('sourceSlideMap')
+if source_slide_map is not None:
+    source_count=len(prs.slides)
+    reuse=data.get('templateReuseMode') in ('design_only','keep_fixed')
+    if not isinstance(source_slide_map,list) or not 1<=len(source_slide_map)<=100 or (not reuse and len(source_slide_map)<source_count) or any(type(index) is not int or index<0 or index>=source_count for index in source_slide_map):
+        raise ValueError('invalid native template slide map')
+    if not reuse and sorted(set(source_slide_map))!=list(range(source_count)):
+        raise ValueError('native template slide map must preserve every original slide')
+    original_ids=list(prs.slides._sldIdLst)
+    occurrence={}
+    ordered_ids=[]
+    for source_index in source_slide_map:
+        used=occurrence.get(source_index,0)
+        occurrence[source_index]=used+1
+        if used==0:
+            ordered_ids.append(original_ids[source_index]); continue
+        source=prs.slides[source_index]
+        target=prs.slides.add_slide(source.slide_layout)
+        target._element.replace(target._element.cSld,copy.deepcopy(source._element.cSld))
+        relation_ids={}
+        for relation in source.part.rels.values():
+            if relation.reltype.endswith('/slideLayout') or relation.reltype.endswith('/notesSlide'): continue
+            new_id=target.part.relate_to(relation.target_ref if relation.is_external else relation.target_part,relation.reltype,is_external=relation.is_external)
+            relation_ids[relation.rId]=new_id
+        for element in target._element.iter():
+            for key,value in list(element.attrib.items()):
+                if key.startswith('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}') and value in relation_ids:
+                    element.set(key,relation_ids[value])
+        ordered_ids.append(list(prs.slides._sldIdLst)[-1])
+    slide_ids=prs.slides._sldIdLst
+    for slide_id in list(slide_ids):
+        slide_ids.remove(slide_id)
+        if reuse and slide_id not in ordered_ids:prs.part.drop_rel(slide_id.rId)
+    for slide_id in ordered_ids: slide_ids.append(slide_id)
+    # python-pptx caches slide objects while the list is mutated. Reload the
+    # reordered deck so output indices address the cloned slides correctly.
+    reordered=io.BytesIO(); prs.save(reordered); reordered.seek(0); prs=Presentation(reordered)
+fonts=data.get('fonts') or {}
+required=('title','body','titleEastAsia','bodyEastAsia')
+if any(not isinstance(fonts.get(key), str) or not fonts[key].strip() for key in required):
+    raise ValueError('template title/body font tokens are required for external PPTX export')
+CJK_RE=re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
+HANT_RE=re.compile(r'[萬與為於後臺國學實體廣應當復雜雙發變這個們體繁臺灣]')
+
+def set_east_asia(run, role='body', family=None):
+    if not CJK_RE.search(run.text or ''):
+        for part,actual in font_runs(run,run.font.name or fonts['body']):part.font.name=actual
+        return
+    if HANT_RE.search(run.text or ''):
+        east_asia=fonts.get('titleEastAsiaHant' if role == 'title' else 'bodyEastAsiaHant') or family or (fonts['titleEastAsia'] if role == 'title' else fonts['bodyEastAsia'])
+    else:
+        east_asia=family or (fonts['titleEastAsia'] if role == 'title' else fonts['bodyEastAsia'])
+    latin=run.font.name or fonts['title' if role=='title' else 'body']
+    for part,actual in font_runs(run,latin,east_asia):
+        part.font.name=actual
+        rpr=part._r.get_or_add_rPr()
+        for child in list(rpr):
+            if child.tag == qn('a:ea'): rpr.remove(child)
+        ea=OxmlElement('a:ea'); ea.set('typeface', actual); rpr.append(ea); rpr.set('lang',('zh-HK' if HANT_RE.search(part.text or '') else 'zh-CN') if CJK_RE.search(part.text or '') else 'en-US')
+
+def apply_frame_fonts(frame, role='body', family=None):
+    for paragraph in frame.paragraphs:
+        for run in paragraph.runs: set_east_asia(run, role, family)
+
+def shape_text_frames(slide, shape):
+    if shape.has_text_frame:
+        yield shape.text_frame, 'title' if slide.shapes.title is shape else 'body'
+    if shape.has_table:
+        for row in shape.table.rows:
+            for cell in row.cells: yield cell.text_frame, 'body'
+
+def native_card_color(value, default):
+    try: return RGBColor.from_string(str(value).lstrip('#'))
+    except (ValueError, TypeError): return default
+
+def native_card_font(paragraph, size, color, bold=False, role='body'):
+    for run in paragraph.runs:
+        run.font.name=fonts['body'];run.font.size=Pt(size);run.font.bold=bold;run.font.color.rgb=color
+        set_east_asia(run,role)
+
+def apply_card_text_style(slide, shape_ids, style, overrides):
+    # Fable Q1(b): the author's font, weight, italic and underline reach every
+    # point card; card size and line height stay as measured.
+    overrides=set(overrides or [])
+    if not overrides & {'fontFamily','fontWeight','fontStyle','textDecoration'}: return
+    for shape in slide.shapes:
+        if shape.shape_id not in shape_ids or not shape.has_text_frame: continue
+        for paragraph in shape.text_frame.paragraphs:
+            for run in list(paragraph.runs):
+                if 'fontStyle' in overrides: run.font.italic=style.get('fontStyle')=='italic'
+                if 'textDecoration' in overrides: run.font.underline=style.get('textDecoration')=='underline'
+                if 'fontWeight' in overrides: run.font.bold=float(style.get('fontWeight',400))>=600
+                if 'fontFamily' in overrides and style.get('fontFamily'): run.font.name=style['fontFamily']; set_east_asia(run)
+
+def add_source_artifact(slide, node):
+    g=node['geometry']; c=node.get('content') or {}; style=node.get('style') or {}; overrides=node.get('nativeTextStyleOverrides') or style
+    # A code block keeps Consolas unless the author chose its font: their own
+    # override wins, else the render contract's textLayout decides.
+    authored_font=style.get('fontFamily') if 'fontFamily' in (node.get('textStyleOverrides') or []) else None
+    font=authored_font or (node.get('textLayout') or {}).get('fontFamily') or ('Consolas' if c.get('codeBlock') else style.get('fontFamily') or fonts['body']); pt=float(style.get('fontSizePt',18))
+    if node['type']=='list' and c.get('pointLayout',{}).get('boxes'):
+        color=native_card_color(style.get('color'),RGBColor(36,42,59));accent=tuple(native_card_color(c['pointLayout'].get('accent'),RGBColor(103,88,200)))
+        source=node.get('sourceArtifact') or {};prefix='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type','')) if source else ''
+        ids=render_point_cards(slide,node['id'],c.get('items') or [],c['pointLayout'],int(g['x']),int(g['y']),int(g['width']),int(g['height']),pt,color,accent,font,native_card_font,native_card_color,prefix)
+        apply_card_text_style(slide,ids,style,node.get('textStyleOverrides'))
+        return ids
+    elif node['type']=='image':
+        from PIL import Image as ArtifactImage
+        blob=base64.b64decode(c['dataUrl'].split(',',1)[1]);image=ArtifactImage.open(io.BytesIO(blob));image.load()
+        shape=contract_picture(slide,blob,g['x'],g['y'],g['width'],g['height'],node.get('imageLayout') or {'fit':'contain'})
+    elif node['type']=='chart':
+        from pptx.chart.data import CategoryChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        contract=node.get('chartLayout') or {}
+        if not contract.get('valid'):raise ValueError('source chart has invalid measured data')
+        data=CategoryChartData();data.categories=c['labels']
+        for series in c.get('series') or [{'name':'Values','values':c['values']}]:data.add_series(series['name'],series['values'])
+        kind={'bar':XL_CHART_TYPE.COLUMN_CLUSTERED,'line':XL_CHART_TYPE.LINE_MARKERS,'pie':XL_CHART_TYPE.PIE}[c['chartType']]
+        # The chart sits on the page's own background (or its panel), never a white band on a dark page (Fable S3).
+        card=slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,int(g['x']),int(g['y']),int(g['width']),int(g['height']));card.line.fill.background()
+        panel=(node.get('style') or {}).get('fill')
+        if isinstance(panel,str) and re.match(r'^#[0-9a-fA-F]{6}$',panel):card.fill.solid();card.fill.fore_color.rgb=RGBColor.from_string(panel[1:])
+        else:card.fill.background()
+        ink=(node.get('style') or {}).get('color');ink=RGBColor.from_string(ink[1:]) if isinstance(ink,str) and re.match(r'^#[0-9a-fA-F]{6}$',ink) else None
+        card.name='AIMate instance:'+str(node['id'])+':0'
+        inset=Inches(.14);shape=slide.shapes.add_chart(kind,int(g['x']+inset),int(g['y']+inset),int(g['width']-2*inset),int(g['height']-2*inset),data);chart=shape.chart
+        title=c.get('chartTitle') or c.get('unit');chart.has_title=bool(title);chart.has_legend=len(c.get('series') or [])>1 or c['chartType']=='pie'
+        if chart.has_title:chart.chart_title.text_frame.text=title;apply_frame_fonts(chart.chart_title.text_frame)
+        if c['chartType'] in ('bar','line'):
+            chart.value_axis.minimum_scale=contract['minimum'];chart.value_axis.maximum_scale=contract['maximum'];chart.value_axis.crosses_at=0
+            chart.value_axis.tick_labels.number_format=contract['numberFormat'];chart.value_axis.tick_labels.number_format_is_linked=False
+            chart.category_axis.tick_labels.font.name=fonts['body'];chart.category_axis.tick_labels.font.size=Pt(12)
+            chart.value_axis.tick_labels.font.name=fonts['body'];chart.value_axis.tick_labels.font.size=Pt(12)
+            if ink is not None:
+                for axis in (chart.category_axis,chart.value_axis):axis.tick_labels.font.color.rgb=ink
+            for axis,title in zip((chart.category_axis,chart.value_axis),c.get('axisTitles') or []):
+                axis.has_title=bool(title)
+                if title:axis.axis_title.text_frame.text=title;apply_frame_fonts(axis.axis_title.text_frame)
+        if c['chartType']=='bar':
+            for series in chart.series:series.invert_if_negative=False
+        # The template's colours, never the theme's Office default (the user's review, 2026-11-02).
+        colors=[RGBColor.from_string(v[1:]) for v in ((node.get('style') or {}).get('seriesColors') or []) if isinstance(v,str) and re.match(r'^#[0-9a-fA-F]{6}$',v)]
+        if colors and c['chartType'] in ('bar','line'):
+            for k,series in enumerate(chart.series):
+                tone=colors[k%len(colors)]
+                if c['chartType']=='bar':series.format.fill.solid();series.format.fill.fore_color.rgb=tone
+                else:series.format.line.color.rgb=tone
+        # Explicit chart script fonts; don't rely on inherited Office defaults.
+        chart_text=' '.join(str(v) for v in c['labels']);family=resolve_font(fonts['bodyEastAsiaHant'] if HANT_RE.search(chart_text) else fonts['bodyEastAsia'] if CJK_RE.search(chart_text) else fonts['body'],chart_text)
+        tx=OxmlElement('c:txPr');body=OxmlElement('a:bodyPr');tx.append(body);tx.append(OxmlElement('a:lstStyle'));para=OxmlElement('a:p');pr=OxmlElement('a:pPr');rpr=OxmlElement('a:defRPr');rpr.set('sz','1200')
+        if ink is not None:
+            fill=OxmlElement('a:solidFill');clr=OxmlElement('a:srgbClr');clr.set('val',str(ink));fill.append(clr);rpr.append(fill)
+        for tag in ('a:latin','a:ea'):f=OxmlElement(tag);f.set('typeface',family);rpr.append(f)
+        pr.append(rpr);para.append(pr);tx.append(para);chart._chartSpace.append(tx)
+        shape.name='AIMate instance:'+str(node['id'])+':1'
+        return [int(card.shape_id),int(shape.shape_id)]
+    elif node['type']=='table':
+        # A headerless source table styles no first row (Fable 2026-11-01, review 7).
+        header=c.get('headerRow') is not False
+        rows=c['rows']; shape=slide.shapes.add_table(len(rows),len(rows[0]),int(g['x']),int(g['y']),int(g['width']),int(g['height']))
+        shape.table.first_row=header
+        weights=c.get('columnWeights') or [1]*len(rows[0]); weight_sum=sum(weights)
+        for col,weight in enumerate(weights): shape.table.columns[col].width=int(g['width']*weight/weight_sum)
+        row_weights=c.get('rowWeights') or [1]*len(rows); row_sum=sum(row_weights)
+        # rowExport 'min' (card decks): minimum rows that PowerPoint grows to their
+        # text, as the built-in renderer writes them (fz-r17: the template path
+        # still split the box by weights and the export check blocked publish).
+        if c.get('rowExport')=='min':
+            for row in shape.table.rows: row.height=int(Pt(pt*1.18+6))
+            # The frame is the sum of the minimum rows (python-pptx sets it): a
+            # taller frame makes LibreOffice put the slack into one row (Fable r19 A).
+            shape.height=sum(int(row.height) for row in shape.table.rows)
+        else:
+            for r,weight in enumerate(row_weights): shape.table.rows[r].height=int(g['height']*weight/row_sum)
+        for r,row in enumerate(rows):
+            for col,value in enumerate(row):
+                cell=shape.table.cell(r,col); cell.text=str(value); cell.margin_top=cell.margin_bottom=Pt(3); cell.margin_left=cell.margin_right=Pt(7.2); cell.text_frame.word_wrap=True; cell.text_frame.auto_size=MSO_AUTO_SIZE.NONE; cell.vertical_anchor=MSO_ANCHOR.TOP; cell.fill.solid(); cell.fill.fore_color.rgb=RGBColor.from_string((style.get('fill','#e7e5f4') if r==0 and header else '#ffffff').lstrip('#'))
+                rich=(c.get('cellRich') or [])[r][col] if c.get('cellRich') else None
+                if rich:
+                    cell.text_frame.clear()
+                    write_rich_text(cell.text_frame.paragraphs[0],rich,pt,style.get('tableHeaderColor' if r==0 and header else 'color','#242a3b'),font,r==0 and header)
+                for p in cell.text_frame.paragraphs:
+                    p._p.get_or_add_pPr().set('hangingPunct','0')
+                    p.line_spacing=1.18; p.space_before=Pt(0); p.space_after=Pt(0)
+                    if not rich:
+                        for run in p.runs: run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.bold=(r==0 and header); run.font.color.rgb=RGBColor.from_string(str(style.get('tableHeaderColor' if r==0 and header else 'color','#242a3b')).lstrip('#')); set_east_asia(run)
+    else:
+        shape=slide.shapes.add_textbox(int(g['x']),int(g['y']),int(g['width']),int(g['height']))
+        apply_surface_fill(shape,node.get('surfaceFill') or {'mode':'none'});shape.line.fill.background()
+        frame=shape.text_frame; frame.word_wrap=True
+        if c.get('mathMl'):frame.margin_left=frame.margin_right=frame.margin_top=frame.margin_bottom=0
+        values=[] if c.get('mathMl') and write_office_math(frame.paragraphs[0],c,pt,style.get('color','#111111')) else [item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else [paragraph['text'] for paragraph in (node.get('textLayout') or {}).get('paragraphs',[])] if (node.get('textLayout') or {}).get('paragraphs') else str(c.get('text','')).split('\n')
+        for i,value in enumerate(values):
+            prefix=(('' if re.match(r'^\s*[0-9]+[.)]\s',str(value)) else str(i+1)+'. ') if node['type']=='timeline' else '• ' if node['type']=='list' else '')
+            specs=(node.get('textLayout') or {}).get('paragraphs') or []
+            expected=specs[i]['text'] if i<len(specs) else prefix+str(value)
+            if str(value) and expected.endswith(str(value)):prefix=expected[:-len(str(value))]
+            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=expected; p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
+            if c.get('richText'):write_rich_text(p,c['richText'],pt,style.get('color','#333333'),font)
+            elif c.get('items') and c['items'][i].get('richText'):
+                rich=dict(c['items'][i]['richText'])
+                rich['plainText']=prefix+rich['plainText'];rich['runs']=[{'kind':'text','text':prefix}]+rich['runs']
+                write_rich_text(p,rich,pt,style.get('color','#333333'),font)
+            if c.get('codeBlock'):
+                p.clear()
+                for piece in re.split(r'([\u2e80-\u9fff\uf900-\ufaff]+)',str(value)):
+                    if piece:p.add_run().text=piece
+            for run in p.runs:
+                run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run,family=font if c.get('codeBlock') else None)
+    if node['type'] in ('text','list','timeline'):
+        apply_text_contract(shape.text_frame,node.get('textLayout') or {})
+        for paragraph in shape.text_frame.paragraphs:
+            paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style.get('textAlign'),PP_ALIGN.LEFT)
+            rich_content=bool(c.get('richText') or any(item.get('richText') for item in c.get('items',[])))
+            for run in paragraph.runs:
+                if not rich_content or 'fontStyle' in overrides:run.font.italic=style.get('fontStyle')=='italic'
+                if not rich_content or 'textDecoration' in overrides:run.font.underline=style.get('textDecoration')=='underline'
+                if 'fontWeight' in overrides:run.font.bold=style['fontWeight']>=600
+    source=node.get('sourceArtifact') or {}
+    shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))+'|AIMate instance:'+str(node.get('id',''))+(':1' if node['type']=='chart' else ':0')
+    return [int(card.shape_id),int(shape.shape_id)] if node['type']=='chart' else int(shape.shape_id)
+
+by_slide={int(item['nativeSlideIndex']):item for item in data['slides'] if item.get('nativeSlideIndex') is not None}
+role_overrides={}
+for slide_index, slide in enumerate(prs.slides):
+    update=by_slide.get(slide_index)
+    if not update: continue
+    by_shape={int(node['nativeShapeId']):node for node in update.get('nodes',[]) if node.get('nativeShapeId') is not None}
+    originals={int(shape.shape_id):copy.deepcopy(shape._element) for shape in slide.shapes}
+    clone_nodes=[node for node in update.get('nodes',[]) if node.get('cloneFromShapeId') is not None]
+    clone_ids=[int(node['nativeShapeId']) for node in clone_nodes]
+    if len(set(clone_ids))!=len(clone_ids) or set(clone_ids)&set(originals):
+        raise ValueError('duplicate native component instance IDs')
+    id_maps={}
+    for member in clone_nodes:
+        binding=member.get('componentBinding') or {}
+        key=(binding.get('componentSpecId'),binding.get('unitIndex'))
+        id_maps.setdefault(key,{})[int(member['cloneFromShapeId'])]=int(member['nativeShapeId'])
+    for node in clone_nodes:
+        origin=int(node['cloneFromShapeId']);target=int(node['nativeShapeId'])
+        binding=node.get('componentBinding') or {};id_map=id_maps.get((binding.get('componentSpecId'),binding.get('unitIndex')),{})
+        if origin not in originals or node.get('type') not in ('image','shape','text'):
+            raise ValueError('unsupported or missing native component member')
+        element=copy.deepcopy(originals[origin])
+        for child in element.iter():
+            if child.tag==qn('p:cNvPr'):
+                child.set('id',str(target));child.set('name',(child.get('name') or 'Component')+' instance '+str(target))
+            if child.tag in (qn('a:stCxn'),qn('a:endCxn')):
+                bound=int(child.get('id','0'))
+                if bound in id_map:child.set('id',str(id_map[bound]))
+                else:child.getparent().remove(child)
+        slide.shapes._spTree.insert_element_before(element,'p:extLst')
+    update['cloneShapeIds']=clone_ids
+    omitted={int(shape_id) for shape_id in update.get('omitShapeIds',[])}
+    if omitted and (omitted & set(by_shape)):
+        raise ValueError('omitted template shape is also present in native nodes on slide '+str(slide_index+1))
+    for shape in list(slide.shapes):
+        if int(shape.shape_id) in omitted:
+            removed_relations={value for element in shape._element.iter() for key,value in element.attrib.items() if key.startswith('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}')}
+            slide.shapes._spTree.remove(shape._element)
+            used={value for element in slide._element.iter() for key,value in element.attrib.items() if key.startswith('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}')}
+            for rid in removed_relations-used:
+                if rid in slide.part.rels:slide.part.drop_rel(rid)
+            continue
+        node=by_shape.get(int(shape.shape_id))
+        if not node: continue
+        geometry=node.get('geometry') or {}
+        for key in ('x','y','width','height'):
+            if key in geometry: setattr(shape, {'x':'left','y':'top','width':'width','height':'height'}[key], int(geometry[key]))
+        if node.get('rotation') is not None:shape.rotation=float(node['rotation'])
+        content=node.get('content') or {}
+        if node['type']=='chart' and shape.has_chart and content.get('chartType') in ('bar','line') and content.get('values'):
+            axis=node.get('chartLayout') or {}
+            shape.chart.value_axis.minimum_scale=axis['minimum'];shape.chart.value_axis.maximum_scale=axis['maximum'];shape.chart.value_axis.crosses_at=0
+            if content['chartType']=='bar':
+                for series in shape.chart.series:series.invert_if_negative=False
+        if content.get('mediaReplacement'):
+            # A borrowed content-slot picture (Fable G2) and a filled page's source
+            # figure in its figure slot (fill-template-first) may replace a first use too.
+            if shape.shape_type!=MSO_SHAPE_TYPE.PICTURE or not content.get('borrowedPicture') and not content.get('fillFigure') and (source_slide_map is None or source_slide_map[:slide_index].count(source_slide_map[slide_index])<1):
+                raise ValueError('native media replacement is only allowed on a copied picture')
+            match=re.fullmatch(r'data:image/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})',content.get('dataUrl') or '')
+            if not match: raise ValueError('invalid replacement image')
+            image_bytes=base64.b64decode(match.group(2),validate=True)
+            if hashlib.sha256(image_bytes).hexdigest()!=content.get('imageSha256'):
+                raise ValueError('replacement image hash mismatch')
+            _,relationship_id=slide.part.get_or_add_image_part(io.BytesIO(image_bytes))
+            shape._element.blipFill.blip.rEmbed=relationship_id
+        crop=content.get('crop')
+        if shape.shape_type==MSO_SHAPE_TYPE.PICTURE and isinstance(crop,list) and len(crop)==4:
+            if any(not isinstance(value,(int,float)) or value<0 or value>=1 for value in crop) or crop[0]+crop[2]>=1 or crop[1]+crop[3]>=1:
+                raise ValueError('invalid native picture crop on slide '+str(slide_index+1))
+            shape.crop_left,shape.crop_top,shape.crop_right,shape.crop_bottom=map(float,crop)
+        style=node.get('style') or {}
+        if node.get('type') in ('shape','text'):apply_surface_fill(shape,node.get('surfaceFill'))
+        if shape.has_text_frame and node.get('type')=='text' and not (node.get('content',{}).get('nativeMath') and node['content'].get('text')==node['content'].get('nativeOriginalText')):
+            content=node.get('content') or {}
+            value=str(content.get('text') or '')
+            role='title' if node.get('semanticRole') in ('title','template-title') else 'body'
+            role_overrides[(slide_index, int(shape.shape_id))]=role
+            family=(node.get('style') or {}).get('eastAsiaFontFamily')
+            paragraph_items=content.get('paragraphs')
+            if value == rich_visible_text(shape._element) and paragraph_items is None and len(shape.text_frame.paragraphs)==len((node.get('textLayout') or {}).get('paragraphs',[])):
+                # Style-only edits retain the native paragraphs/runs. Moving
+                # the whole string into run 1 destroys multi-paragraph fonts,
+                # list spacing and formatting even when the text is unchanged.
+                pass
+            elif content.get('nativeRunProjection'):
+                specs=(node.get('textLayout') or {}).get('paragraphs') or []
+                if len(specs)!=len(shape.text_frame.paragraphs):raise ValueError('native range paragraph structure changed')
+                for paragraph,spec in zip(shape.text_frame.paragraphs,specs):
+                    write_rich_text(paragraph,{'runs':spec['runs']},float(style.get('fontSizePt',18)),style.get('color','#111111'),style.get('fontFamily') or fonts['body'])
+            elif content.get('richText'):
+                for extra in list(shape.text_frame.paragraphs)[1:]:shape.text_frame._txBody.remove(extra._p)
+                write_rich_text(shape.text_frame.paragraphs[0],content['richText'],float(style.get('fontSizePt',18)),style.get('color','#111111'),style.get('fontFamily') or fonts['body'],bool(style.get('fontWeight',400)>=600))
+            elif content.get('nativeMath'):
+                raise ValueError('native_formula_edit_requires_typed_source: supply the formula source before changing imported math')
+            elif paragraph_items is not None:
+                source_paragraphs=[paragraph for paragraph in shape.text_frame.paragraphs if paragraph.text.strip()]
+                if not isinstance(paragraph_items,list) or not paragraph_items or len(paragraph_items)>len(source_paragraphs):
+                    raise ValueError('native template paragraph count mismatch on slide '+str(slide_index+1)+' shape '+str(shape.shape_id))
+                # A balanced list holds fewer items than its sample paragraphs (Fable D2): the rest go.
+                for extra in source_paragraphs[len(paragraph_items):]:shape.text_frame._txBody.remove(extra._p)
+                source_paragraphs=source_paragraphs[:len(paragraph_items)]
+                for paragraph_index,(paragraph,item) in enumerate(zip(source_paragraphs,paragraph_items)):
+                    if not isinstance(item,dict) or not str(item.get('body') or '').strip():
+                        raise ValueError('native template paragraph is empty on slide '+str(slide_index+1)+' shape '+str(shape.shape_id))
+                    label=str(item.get('label') or '').strip(); body=str(item['body']).strip()
+                    if item.get('richText'):
+                        pt=next((r.font.size.pt for r in paragraph.runs if r.font.size),float(style.get('fontSizePt',18)))
+                        rich=dict(item['richText']);specs=(node.get('textLayout') or {}).get('paragraphs',[])
+                        if paragraph_index<len(specs):rich['runs']=specs[paragraph_index].get('runs',rich['runs'])
+                        write_rich_text(paragraph,rich,pt,style.get('color','#111111'),style.get('fontFamily') or fonts['body'])
+                        continue
+                    runs=paragraph.runs
+                    has_label=bool(len(runs)>1 and runs[0].font.bold and any(run.text.strip() for run in runs[1:]))
+                    if has_label:
+                        if not label: raise ValueError('native template label is empty')
+                        runs[0].text=label
+                        runs[1].text=('' if body.startswith(('：',':','（','(')) else '：')+body
+                        for run in runs[2:]: run._r.getparent().remove(run._r)
+                    elif runs:
+                        runs[0].text=body if not label else label+'：'+body
+                        for run in runs[1:]: run._r.getparent().remove(run._r)
+                    else: paragraph.text=body if not label else label+'：'+body
+            else:
+                # A changed scalar slot is one contracted paragraph. Old blank
+                # paragraphs must not survive after replacing/clearing a slot;
+                # unchanged native text keeps its original run hierarchy above.
+                for extra in list(shape.text_frame.paragraphs)[1:]:shape.text_frame._txBody.remove(extra._p)
+                runs=[run for paragraph in shape.text_frame.paragraphs for run in paragraph.runs]
+                # A filled card's body takes the sample's body run, never its
+                # bold label run (fill-template-first; 3197 JEPA p9 was all bold).
+                if content.get('plainBody') and len(runs)>1 and runs[0].font.bold and not runs[-1].font.bold:
+                    runs[0]._r.getparent().remove(runs[0]._r);runs=runs[1:]
+                if runs:
+                    runs[0].text=value
+                    # Emptied template runs go: an invisible run keeps its old size
+                    # and the export check reads it (live alpha-gph3: a 17 pt run in a 20 pt title).
+                    for run in runs[1:]: run._r.getparent().remove(run._r)
+                else: shape.text=value
+            apply_text_contract(shape.text_frame,node.get('textLayout') or {})
+            if content.get('plainBody'):
+                # One body sentence is no list item: the sample's bullet goes.
+                for paragraph in shape.text_frame.paragraphs:
+                    # One paragraph property set: a second copy of the sample's (bullet and all) goes.
+                    for extra in paragraph._p.findall(qn('a:pPr'))[1:]:paragraph._p.remove(extra)
+                    pPr=paragraph._p.get_or_add_pPr()
+                    for tag in ('a:buChar','a:buAutoNum','a:buBlip','a:buFont','a:buSzPct','a:buSzPts','a:buClr','a:buNone'):
+                        for element in pPr.findall(qn(tag)):pPr.remove(element)
+                    none=pPr.makeelement(qn('a:buNone'),{})
+                    # Schema order: after the spacing and bullet-style elements, before tabLst/defRPr/extLst.
+                    later=[index for index,element in enumerate(pPr) if element.tag in (qn('a:tabLst'),qn('a:defRPr'),qn('a:extLst'))]
+                    pPr.insert(later[0] if later else len(pPr),none)
+                    if pPr.get('indent') is not None and int(pPr.get('indent'))<0:pPr.set('indent','0')
+                    if pPr.get('marL') is not None:pPr.set('marL','0')
+            if content.get('templateFit'):
+                shape.text_frame.auto_size=MSO_AUTO_SIZE.NONE
+                if content.get('adaptiveMediaReclaim'):
+                    shape.text_frame.word_wrap=True
+                for paragraph in shape.text_frame.paragraphs:
+                    if isinstance(paragraph.line_spacing,(int,float)) and 0 < paragraph.line_spacing < .95:
+                        paragraph.line_spacing=1.0
+            # Keep all original per-run typography by default. A user's
+            # object-level edit applies to every paragraph/run, including
+            # native multi-paragraph list slots, and survives font resolution.
+            uniform=(node.get('textLayout') or {}).get('uniformStyle') or {}
+            for paragraph in shape.text_frame.paragraphs:
+                if uniform.get('lineHeight'):paragraph.line_spacing=float(uniform['lineHeight'])
+                if style.get('textAlign'):paragraph.alignment={'left':PP_ALIGN.LEFT,'center':PP_ALIGN.CENTER,'right':PP_ALIGN.RIGHT}[style['textAlign']]
+                for run in paragraph.runs:
+                    if uniform.get('fontFamily'):run.font.name=uniform['fontFamily']
+                    if uniform.get('fontSizePt'):run.font.size=Pt(uniform['fontSizePt'])
+                    if uniform.get('fontWeight') is not None:run.font.bold=bool(uniform['fontWeight'] >= 600)
+                    if uniform.get('fontStyle'):run.font.italic=uniform['fontStyle']=='italic'
+                    if uniform.get('textDecoration'):run.font.underline=uniform['textDecoration']=='underline'
+                    if uniform.get('color'):run.font.color.rgb=RGBColor.from_string(uniform['color'].lstrip('#').upper())
+            apply_frame_fonts(shape.text_frame, role, family)
+    # Explicit object layering uses the same zIndex as the editor, preserving
+    # all native objects and relationships. Equal layers retain source order.
+    layers={int(node['nativeShapeId']):node.get('zIndex',0) for node in update.get('nodes',[]) if node.get('nativeShapeId') is not None}
+    ordered=sorted(list(slide.shapes),key=lambda shape:layers.get(int(shape.shape_id),0))
+    for shape in ordered:
+        slide.shapes._spTree.remove(shape._element)
+        slide.shapes._spTree.insert_element_before(shape._element,'p:extLst')
+
+# Imported files may already contain Chinese in a run that only declares a
+# Latin font. Repair every editable text frame and table cell before publishing.
+failures=[]
+for slide_index, slide in enumerate(prs.slides):
+    for shape in slide.shapes:
+        for frame, role in shape_text_frames(slide, shape):
+            role=role_overrides.get((slide_index, int(shape.shape_id)), role)
+            apply_frame_fonts(frame, role)
+            for paragraph in frame.paragraphs:
+                for run in paragraph.runs:
+                    if '\ufffd' in (run.text or ''): failures.append('slide '+str(slide_index + 1)+' contains Unicode replacement character')
+                    if CJK_RE.search(run.text or ''):
+                        rpr=run._r.get_or_add_rPr(); ea=rpr.find(qn('a:ea'))
+                        if ea is None or not (ea.get('typeface') or '').strip(): failures.append('slide '+str(slide_index + 1)+' has CJK without a:ea')
+if failures: raise ValueError('PPTX font integrity validation failed: '+'; '.join(failures[:12]))
+
+for slide_index,slide in enumerate(prs.slides):
+    update=by_slide.get(slide_index) or {}
+    added_ids=[]; added_pictures={}
+    layout_layers=0
+    for node in update.get('sourceArtifacts',[]):
+        # A promoted layout picture and its tints (Fable G1): bytes once per
+        # deck, drawn behind every other object of the slide, in their order.
+        layout_key=(node.get('content') or {}).get('layoutPictureKey') if (node.get('content') or {}).get('derivedFrom')=='layout-picture' else None
+        if layout_key:
+            node['content']['dataUrl']=(data.get('layoutPictures') or {})[layout_key]
+        ids=add_source_artifact(slide,node); added_ids.append(ids)
+        if layout_key:
+            for shape in list(slide.shapes):
+                if int(shape.shape_id)==int(ids):
+                    tree=slide.shapes._spTree;tree.remove(shape._element);tree.insert(2+layout_layers,shape._element);layout_layers+=1;break
+        if node.get('type')=='image':
+            if isinstance(ids,list):raise ValueError('source image produced multiple shapes')
+            image_bytes=base64.b64decode(node['content']['dataUrl'].split(',',1)[1])
+            added_pictures[int(ids)]=hashlib.sha256(image_bytes).hexdigest()
+    update['addedShapeIds']=[i for ids in added_ids for i in (ids if isinstance(ids,list) else [ids])]
+    update['addedPictures']=added_pictures
+for note in (data.get('exportManifest') or {}).get('notes',[]):
+    prs.slides[note['index']].notes_slide.notes_text_frame.text=note['text']
+# Deck-builder marks are removed from every master, layout and slide (user decision 2026-10-24).
+builder_marks_removed=strip_builder_marks(prs)
+target=os.environ.get('PPT_OUTPUT','/workspace/presentation.pptx'); tmp=target+'.part'; prs.save(tmp)
+from hashlib import sha256
+from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_SHAPE
+before=Presentation(original); strip_builder_marks(before); after=Presentation(tmp)
+if data.get('nativeIdNormalization'):normalize_native_shape_ids(before)
+expected_map=source_slide_map if source_slide_map is not None else list(range(len(before.slides)))
+if len(expected_map)!=len(after.slides): raise ValueError('template slide count changed during export')
+for index,source_index in enumerate(expected_map):
+    left=before.slides[source_index]; right=after.slides[index]
+    omitted={int(shape_id) for shape_id in by_slide.get(index,{}).get('omitShapeIds',[])}
+    source_ids={int(shape.shape_id) for shape in left.shapes}
+    output_ids={int(shape.shape_id) for shape in right.shapes}
+    added=set(by_slide.get(index,{}).get('addedShapeIds',[]))|set(by_slide.get(index,{}).get('cloneShapeIds',[]))
+    if not omitted.issubset(source_ids) or output_ids!=source_ids-omitted|added: raise ValueError('undeclared template shape loss on slide '+str(index+1)+': '+json.dumps({'source':sorted(source_ids),'omitted':sorted(omitted),'added':list(added),'output':sorted(output_ids)}))
+    requested={int(node['nativeShapeId']):node for node in by_slide.get(index,{}).get('nodes',[]) if node.get('nativeShapeId') is not None}
+    source_pictures={int(shape.shape_id):sha256(shape.image.blob).hexdigest() for shape in left.shapes if shape.shape_type==MSO_SHAPE_TYPE.PICTURE}
+    output_pictures={int(shape.shape_id):sha256(shape.image.blob).hexdigest() for shape in right.shapes if shape.shape_type==MSO_SHAPE_TYPE.PICTURE}
+    # A clone keeps its origin's bytes unless it declares a replacement, like an
+    # original picture (live alpha-r36 p8: badge icons varied across eight cards).
+    cloned_pictures={int(node['nativeShapeId']):((node.get('content') or {}).get('imageSha256') if (node.get('content') or {}).get('mediaReplacement') else source_pictures[int(node['cloneFromShapeId'])]) for node in requested.values() if node.get('cloneFromShapeId') is not None and node.get('type')=='image'}
+    artifact_pictures=by_slide.get(index,{}).get('addedPictures',{})
+    if output_pictures.keys()!=source_pictures.keys()-omitted|cloned_pictures.keys()|artifact_pictures.keys(): raise ValueError('undeclared template picture loss on slide '+str(index+1))
+    for shape_id,expected_hash in artifact_pictures.items():
+        if output_pictures.get(shape_id)!=expected_hash:raise ValueError('source image bytes changed on slide '+str(index+1))
+    for shape_id,expected_hash in cloned_pictures.items():
+        if output_pictures.get(shape_id)!=expected_hash:raise ValueError('native component clone changed image bytes')
+    for shape_id,source_hash in source_pictures.items():
+        if shape_id in omitted: continue
+        node=requested.get(shape_id) or {}; content=node.get('content') or {}
+        expected=content.get('imageSha256') if content.get('mediaReplacement') else source_hash
+        if expected!=output_pictures[shape_id]: raise ValueError('template picture bytes changed outside declared variant on slide '+str(index+1))
+    for shape in right.shapes:
+        node=requested.get(int(shape.shape_id))
+        if not node or not shape.has_text_frame or node.get('type')!='text': continue
+        content=node.get('content') or {}
+        paragraphs=content.get('paragraphs')
+        if paragraphs is None:
+            expected_text=str(content.get('text') or '').strip()
+            if expected_text!=(rich_visible_text(shape._element) if content.get('nativeMath') or content.get('richText') else shape.text).strip():
+                raise ValueError('native template text mismatch on slide '+str(index+1)+' shape '+str(shape.shape_id))
+            continue
+        written=[paragraph for paragraph in shape.text_frame.paragraphs if rich_visible_text(paragraph._p).strip()]
+        if len(written)!=len(paragraphs): raise ValueError('native template paragraph loss on slide '+str(index+1)+' shape '+str(shape.shape_id))
+        source_shape=next((item for item in left.shapes if item.shape_id==shape.shape_id),None)
+        source_written=[paragraph for paragraph in source_shape.text_frame.paragraphs if paragraph.text.strip()] if source_shape is not None and source_shape.has_text_frame else []
+        for paragraph_index,(paragraph,item) in enumerate(zip(written,paragraphs)):
+            if str(item.get('body') or '').strip() not in rich_visible_text(paragraph._p): raise ValueError('native template paragraph text mismatch')
+            source_runs=source_written[paragraph_index].runs
+            source_has_bold_label=bool(len(source_runs)>1 and source_runs[0].font.bold and any(run.text.strip() and not run.font.bold for run in source_runs[1:]))
+            if not item.get('richText') and item.get('label') and source_has_bold_label and (requested.get(int(shape.shape_id),{}).get('textLayout') or {}).get('uniformStyle',{}).get('fontWeight') is None and not any(run.font.bold and str(item['label']).strip() in run.text for run in paragraph.runs):
+                raise ValueError('native template label styling changed')
+        for paragraph_index,(before_paragraph,after_paragraph) in enumerate(zip(source_written,written)):
+            if paragraphs[paragraph_index].get('richText'):continue
+            for before_run,after_run in zip(before_paragraph.runs,after_paragraph.runs):
+                if before_run.font.size is not None and before_run.font.size!=after_run.font.size and not (requested.get(int(shape.shape_id),{}).get('textLayout') or {}).get('uniformStyle',{}).get('fontSizePt'):
+                    raise ValueError('native template font size changed on slide '+str(index+1))
+        if content.get('templateFit') and shape.text_frame.auto_size!=MSO_AUTO_SIZE.NONE:
+            raise ValueError('native template unexpectedly shrinks font on slide '+str(index+1))
+os.replace(tmp,target)
+verification=verify_export(target,data.get('exportManifest'))
+print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize(target),'preservedOriginal':True,'exportVerification':verification,'fontResolution':list(FONT_RESOLUTIONS.values())}))
+`;
+
+function runPython(project, script, input, max = Math.min(templateLimits().managedBytes * 2, templateLimits().memoryBytes / 4)) {
+  return orch.ensureContainer(project.id, project.uid, orch.KIND_PPT).then(({ name }) => new Promise((resolve, reject) => {
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = ''; let err = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('template_timeout: PPTX operation timed out')); }, script === IMPORT_SCRIPT ? templateLimits().timeoutMs : 120000); timer.unref();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { out += chunk; if (out.length > max) child.kill(); });
+    child.stderr.on('data', chunk => { err = (err + chunk).slice(-3000); });
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', code => { clearTimeout(timer); if (code) reject(new Error(`PPTX fidelity operation failed: ${err.slice(-500)}`)); else { try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX fidelity operation returned invalid JSON')); } } });
+    child.stdin.on('error', () => {}); child.stdin.end(input);
+  }));
+}
+
+export function projectFromImportedManifest(project, manifest, hash) {
+  const slides = manifest.slides.map(item => {
+    const slideId = stableId('slide', hash, item.index);
+    const title=titleFromNativeShapes(item.shapes,manifest.width,manifest.height);
+    return {
+      id: slideId, title:title?.text||`Slide ${item.index+1}`, titleExtraction:title, nativeSlideIndex: item.index, ...(item.layoutRef?{nativeLayout:item.layoutRef}:{}), nativeBackground: item.background, layoutId: 'summary', layoutRef: 'summary', role: item.index === 0 ? 'cover' : 'content',
+      nodes: item.shapes.map(shape => ({
+        id: stableId('node', hash, item.index, shape.shapeId), type: shape.kind,
+        semanticRole: shape.shapeId===title?.shapeId ? 'title' : shape.kind === 'text' ? 'native-text' : 'visual',
+        slotId: 'absolute', styleRef: 'native', locked: shape.locked, zIndex: shape.zIndex, rotation:shape.rotation||0,
+        style: { ...(shape.fill ? { fill: shape.fill } : {}), ...(shape.lineColor?{lineColor:shape.lineColor}:{}), ...(shape.color ? { color: shape.color } : {}),
+          ...(shape.fontFamily ? { fontFamily: shape.fontFamily } : {}), ...(shape.eastAsiaFontFamily ? { eastAsiaFontFamily: shape.eastAsiaFontFamily } : {}), ...(shape.fontSizePt ? { fontSizePt: shape.fontSizePt } : {}),
+          ...(shape.bold !== undefined ? { fontWeight: shape.bold ? 700 : 400, fontStyle: shape.italic ? 'italic' : 'normal' } : {}) },
+        geometry: { x: shape.x, y: shape.y, width: shape.width, height: shape.height },
+        nativeRef: { contractVersion:2, slideIndex: item.index, shapeId: shape.shapeId, name: shape.name,
+          shapeType: shape.shapeType, autoShapeType: shape.autoShapeType, xmlHash:shape.xmlHash, nestedMediaHashes:shape.nestedMediaHashes },
+        content: shape.kind === 'text' ? { text: shape.text,...(shape.nativeMath?{nativeMath:true,nativeMathStructures:shape.nativeMathStructures,nativeOriginalText:shape.text,rawText:shape.nativeRawText}:{}) } : shape.kind === 'image' ? { dataUrl: shape.dataUrl, crop: shape.crop, imageSha256: shape.imageSha256, imageDhash: shape.imageDhash, monochromePanel:shape.monochromePanel, emptyContentFrame:shape.emptyContentFrame, panelColor:shape.panelColor,foregroundColor:shape.foregroundColor, nativeMaskXml:shape.maskXml, ...(shape.ocr?{ocr:shape.ocr}:{}),...(shape.pixels?{pixels:shape.pixels}:{}), ...(shape.href?{href:shape.href}:{}) } : shape.kind === 'table' ? { rows: shape.rows,...(shape.nativeMathStructures?{nativeMath:true,nativeMathStructures:shape.nativeMathStructures}:{}),columnWeights:shape.columnWeights,rowWeights:shape.rowWeights } : shape.kind === 'chart' ? shape.chartContent : { label: shape.name, shape: shape.presetGeometry==='ellipse'?'ellipse':'rect',...(shape.presetGeometry?{presetGeometry:shape.presetGeometry,...(Number.isFinite(shape.presetAdjust)?{presetAdjust:shape.presetAdjust}:{})}:{}) },
+        ...(shape.textFrame ? { nativeTextFrame: {...shape.textFrame,originalHeight:shape.height} } : {}),
+      })),
+    };
+  });
+  project.deck = ensureDeckV3({ schemaVersion: 3, deckId: stableId('deck', hash), slides });
+  for(const slide of project.deck.slides)for(const node of slide.nodes||[])if(node.nativeRef&&node.type==='text')node.nativeStyleBaseline=structuredClone(node.style||{});
+  project.importedInputScope = project.deck.slides.map(slide => ({ id: slide.id, nodes: slide.nodes.filter(node => ['text', 'table', 'chart'].includes(node.type)).map(node => ({ type: node.type, content: node.content })) }));
+  project.outline = project.deck.slides.map((slide, index) => ({ id: slide.id, title: slide.title || `Slide ${index + 1}`, focus: '', refs: [] }));
+  project.pages = slides.length;
+  project.externalPptx = { nativeContractVersion:2, mode: 'preserve', sha256: hash, originalPath: manifest.path, inherited: manifest.inherited || [], fontSubstitutions: manifest.compressedFonts || [], ...(manifest.nativeIdNormalization?{nativeIdNormalization:manifest.nativeIdNormalization}:{}), width: manifest.width, height: manifest.height, importedAt: new Date().toISOString() };
+  return project;
+}
+
+export async function importEditablePptx(project, bytes, hash, io = {}) {
+  const manifest = await (io.runPython || runPython)(project, IMPORT_SCRIPT, bytes);
+  const imported = projectFromImportedManifest(project, manifest, hash);
+  // Without a system tesseract the server's own OCR reads the pictures (2026-11-02).
+  await readTemplatePictures(imported, io.pictureReader || {});
+  return imported;
+}
+
+export async function renderImportedPptx(project, io = {}) {
+  // Renderer preparation must not mutate the reviewed/editor candidate, even
+  // when native export fails before a file is produced.
+  project=structuredClone(project);
+  for(const slide of project.deck.slides){fitSourceMathFrames(slide,project);fitNativeTextFrames(project,slide);}
+  const renderTree=buildRenderTree(project);
+  const rendered=new Map(renderTree.slides.flatMap(slide=>slide.elements.filter(e=>e.nodeId).map(e=>[e.nodeId,e])));
+  const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
+    nativeSlideIndex: slide.nativeSlideIndex,
+    omitShapeIds: [...(slide.templateOmissions || []).map(item => item.shapeId),...(slide.nodes||[]).filter(n=>n.hidden||Number(n.style?.opacity??1)<=0).map(n=>n.nativeRef?.shapeId).filter(id=>id!==undefined)],
+    sourceArtifacts: (slide.nodes || []).filter(node=>isSourceOwnedNode(node)||node.semanticRole==='closing-greeting'||node.semanticRole==='page-number'&&!node.nativeRef||node.semanticRole==='template-marker'&&!node.nativeRef||node.content?.derivedFrom==='title-hierarchy'&&!node.nativeRef||node.semanticRole==='card-lead'&&!node.nativeRef).map(node=>({...node,surfaceFill:surfaceFill(node),...(rendered.get(node.id)?.content?.pointLayout?{content:{...node.content,pointLayout:rendered.get(node.id).content.pointLayout}}:{}),textLayout:textContract({...node,kind:node.type}),imageLayout:node.type==='image'?imageContract(node.content):undefined,chartLayout:node.type==='chart'?chartContract(node.content):undefined})).map(node=>node.content?.derivedFrom==='layout-picture'?{...node,content:Object.fromEntries(Object.entries(node.content).filter(([key])=>key!=='dataUrl'))}:node),
+    nodes: slide.nodes.filter(node => node.nativeRef).map(node => ({ type: node.type, semanticRole: node.semanticRole,
+      nativeShapeId: node.nativeRef.shapeId,componentBinding:node.templateComponentBinding,
+      ...(node.nativeRef.cloneFromShapeId!==undefined?{cloneFromShapeId:node.nativeRef.cloneFromShapeId}:{}),
+      // The original PPTX already owns unchanged image bytes. Sending the same
+      // base64 payload for every copy makes long-deck export unnecessarily huge.
+      content: node.type === 'image' && !node.content?.mediaReplacement
+        ? Object.fromEntries(Object.entries(node.content || {}).filter(([key]) => key !== 'dataUrl')) : node.content,
+      geometry: node.geometry, style: node.style, surfaceFill:surfaceFill(node), rotation: node.rotation, zIndex: node.zIndex, chartLayout:node.type==='chart'?chartContract(node.content):undefined, textLayout: textContract({...node,kind:node.type}) })),
+  }));
+  return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, nativeIdNormalization:project.externalPptx.nativeIdNormalization, title:project.title, slides,
+    canonicalPageNumbers: cardsFlow(project)&&project.deck.slides.every((slide,index)=>index===0||(slide.nodes||[]).some(node=>!node.hidden&&node.semanticRole==='page-number'&&String(node.content?.text||'').trim()===String(index+1))),
+    clearTemplateNotes: ['design_only','keep_fixed'].includes(project.templateContentMode), inheritedActions: project.externalPptx.inheritedActions || [],
+    // Each promoted layout picture once; its slide nodes name it (Fable G1).
+    layoutPictures: layoutPictureImages(project.templateFidelity?.layoutPictures), sourceSlideMap: project.templateSlideMap, templateReuseMode:project.templateFidelity?.mode==='preserve'?project.templateContentMode:undefined, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project,renderTree) }));
+}
+
+export const _internals = { IMPORT_SCRIPT, EXPORT_SCRIPT };

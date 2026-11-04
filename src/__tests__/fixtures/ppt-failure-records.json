@@ -1,0 +1,320 @@
+{
+ "origin": {
+  "note": "Real outline failure records of the Factor Zoo lab runs (qwen3.8-max), 2026-10-21/22, as the project store saved them. Trace template ids and keep-facts advisories removed; messages are the code-generated contract texts.",
+  "projects": [
+   "0967b776",
+   "7e5e5469",
+   "8ff80c5b",
+   "b1063d81",
+   "cd5a2737"
+  ]
+ },
+ "records": {
+  "transport_timeout": {
+   "project": "8ff80c5b",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "timeout",
+    "origin": "model_transport",
+    "model": "qwen3.8-max",
+    "at": "2026-10-21T05:50:58.035Z",
+    "modelStage": "outline:table-cell-audit:b_0016:0:5e83965d9cc92655",
+    "diagnostic": {
+     "kind": "timeout",
+     "origin": "execution",
+     "elapsedMs": 80906,
+     "firstTokenMs": 838,
+     "receivedChars": 2061
+    }
+   }
+  },
+  "transport_http400": {
+   "project": "0967b776",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "request_invalid",
+    "origin": "model_transport",
+    "model": "qwen3.8-max",
+    "at": "2026-10-20T10:52:54.009Z",
+    "modelStage": "input:understand",
+    "diagnostic": {
+     "origin": "execution",
+     "httpStatus": 400,
+     "elapsedMs": 2129,
+     "receivedChars": 0
+    }
+   }
+  },
+  "transport_window_timeout": {
+   "project": "7e5e5469",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "timeout",
+    "origin": "model_transport",
+    "model": "qwen3.8-max",
+    "at": "2026-10-20T16:28:12.315Z",
+    "modelStage": "outline:editorial-capacity:2",
+    "diagnostic": {
+     "kind": "timeout",
+     "origin": "execution",
+     "elapsedMs": 420011,
+     "firstTokenMs": 5989,
+     "receivedChars": 71595
+    }
+   }
+  },
+  "legacy_contract_no_trace": {
+   "project": "0967b776",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "coverage_invalid",
+    "origin": "model_contract",
+    "model": "qwen3.8-max",
+    "at": "2026-10-20T11:01:12.130Z",
+    "contractStage": "input:understand",
+    "diagnostic": {}
+   }
+  },
+  "legacy_budget": {
+   "project": "b1063d81",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "execution_attempt_limit",
+    "origin": "budget",
+    "model": "qwen3.8-max",
+    "at": "2026-10-21T04:55:56.923Z",
+    "diagnostic": {}
+   }
+  },
+  "ownership_page_repairs": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "semantic_ownership_invalid",
+    "origin": "unknown",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T08:33:44.542Z",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "planning",
+     "stage": "outline",
+     "code": "semantic_ownership_invalid",
+     "message": "Page 16 crosses reviewed logical topics:  do not belong to \"?\".",
+     "pageIndex": 15,
+     "repairs": [
+      {
+       "pass": 0,
+       "kind": "table-projection",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 1,
+       "kind": "summary",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 2,
+       "kind": "summary",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 3,
+       "kind": "selection",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 4,
+       "kind": "selection",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 5,
+       "kind": "selection",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 6,
+       "kind": "selection",
+       "outcome": "progress",
+       "code": "coverage_invalid"
+      },
+      {
+       "pass": 7,
+       "kind": "selection",
+       "outcome": "progress",
+       "code": "semantic_ownership_invalid"
+      }
+     ],
+     "governor": {
+      "used": 8,
+      "budget": 16
+     }
+    }
+   }
+  },
+  "coverage_oscillation": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "coverage_invalid",
+    "origin": "model_contract",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T10:10:35.169Z",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "remediation_no_progress",
+     "stage": "outline",
+     "code": "coverage_invalid",
+     "message": "ppt_content_selection_invalid: Selected topics lose an indispensable explanation relation/condition.",
+     "sourceUnitIds": [
+      "b_0117",
+      "b_0119",
+      "b_0120",
+      "b_0214",
+      "b_0212"
+     ],
+     "governor": {
+      "stopped": "oscillation",
+      "used": 10,
+      "budget": 16,
+      "advised": {
+       "summary_faithfulness": 3
+      }
+     }
+    }
+   }
+  },
+  "capacity_step": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "planning_contract_invalid",
+    "origin": "model_contract",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T07:15:40.897Z",
+    "contractStage": "outline:capacity",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "planning",
+     "stage": "outline",
+     "code": "planning_contract_invalid",
+     "message": "Missing global source coverage: b_0222, b_0223, b_0224.",
+     "step": "outline:capacity",
+     "sourceUnitIds": [
+      "b_0222",
+      "b_0223",
+      "b_0224"
+     ],
+     "governor": {
+      "used": 0,
+      "budget": 16
+     }
+    }
+   }
+  },
+  "page_authorization": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "page_authorization_required",
+    "origin": "unknown",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T07:11:13.779Z",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "planning",
+     "stage": "outline",
+     "code": "page_authorization_required",
+     "message": "At the standard content mode this outline needs about 26 pages including the cover (estimated from 5.54 in of measured body height per page); the authorized maximum is 16. Raise it to 26, choose a shorter content mode (concise needs about 22), or show the body in one language.",
+     "measurement": "estimated",
+     "governor": {
+      "used": 0,
+      "budget": 16
+     }
+    }
+   }
+  },
+  "coverage_budget_stop": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "coverage_invalid",
+    "origin": "model_contract",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T03:32:21.062Z",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "planning",
+     "stage": "outline",
+     "code": "coverage_invalid",
+     "message": "ppt_content_selection_invalid: A major source topic has no actual visible explanation; choose a source from the chapter, not necessarily its first paragraph.",
+     "sourceUnitIds": [
+      "b_0222",
+      "b_0223"
+     ],
+     "governor": {
+      "stopped": "budget",
+      "used": 25,
+      "budget": 16
+     }
+    }
+   }
+  },
+  "coverage_many_sources": {
+   "project": "cd5a2737",
+   "failure": {
+    "version": 2,
+    "stage": "outline",
+    "code": "coverage_invalid",
+    "origin": "model_contract",
+    "model": "qwen3.8-max",
+    "at": "2026-10-22T02:01:03.724Z",
+    "diagnostic": {},
+    "trace": {
+     "version": 1,
+     "class": "planning",
+     "stage": "outline",
+     "code": "coverage_invalid",
+     "message": "ppt_content_selection_invalid: Complete-source review found omitted core topics or necessary qualifiers of visible claims.",
+     "sourceUnitIds": [
+      "b_0130",
+      "b_0131",
+      "b_0132",
+      "b_0133",
+      "b_0138",
+      "b_0139",
+      "b_0141",
+      "b_0142",
+      "b_0147",
+      "b_0148",
+      "b_0149",
+      "b_0150",
+      "b_0162",
+      "b_0163"
+     ]
+    }
+   }
+  }
+ }
+}

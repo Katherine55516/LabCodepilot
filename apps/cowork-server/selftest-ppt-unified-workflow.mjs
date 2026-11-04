@@ -1,0 +1,176 @@
+import assert from 'node:assert/strict';
+import {defaultGenerationPolicy,explicitLanguageRequest,normalizeGenerationPolicy} from './lib/ppt-generation-policy.mjs';
+import {libraryEligible} from './lib/ppt-library.mjs';
+import {outlineOwnershipRepairPrompt,applyOutlineOwnershipRepair,outlineResponseSchema} from './lib/ppt-outline-protocol.mjs';
+import {outlineConfirmationHash,recordOutlineConfirmation} from './lib/ppt-outline-confirmation.mjs';
+import {fitNativeTitleFrames} from './lib/ppt-template-fidelity.mjs';
+assert.equal(normalizeGenerationPolicy(undefined),undefined);
+const defaults=defaultGenerationPolicy('# 深度学习\nDeep Learning\nUse a loss function.');
+// Outline concision (item 3): source languages with one body language by default.
+assert.deepEqual(defaults.language,{mode:'source',body:'both',title:'primary'},'titles in the primary language by default (the user, 2026-10-24)');assert.equal(defaults.content,'overview');assert.equal(defaults.knowledge,'source_only');assert.equal(defaults.details,undefined);assert.equal(defaults.archive,'none');
+for(const [request,locale] of [['请用英文生成演示文稿','en'],['输出语言：英文','en'],['Please write the presentation in English','en'],['請用繁體中文（香港）生成簡報','zh-HK'],['请用简体中文生成PPT','zh']])assert.equal(explicitLanguageRequest(request),locale);
+for(const request of ['# English and Chinese methods','> 请用英文生成PPT','```\n请用英文\n```','本文讨论如何使用英文语料训练模型','使用英文语料训练模型','请使用英文语料训练模型'])assert.equal(explicitLanguageRequest(request),undefined);
+const deck={slides:[{id:'slide1'}]};
+for(const status of ['ingesting','outlining','outline_ready','failed','quality_blocked','generating'])assert.equal(libraryEligible({status,outline:[{}],deck}),false);
+assert.equal(libraryEligible({status:'completed',deck}),true);
+assert.equal(libraryEligible({status:'quality_blocked',deck,publishedRevision:2}),true);
+assert.equal(libraryEligible({status:'generating',deck,publishedRevision:undefined}),false);
+const raw={version:2,selection:[{sourceUnitId:'b2',destination:'slides',reason:'required'}],slides:[{title:'Cover',focus:'Opening',role:'cover',sourceUnitIds:[]},{title:'Topic',focus:'Define the topic',sourceUnitIds:['b1']},{title:'Conclusion',focus:'Conclusion',sourceUnitIds:[]}]};
+const diagnostic={details:{conflicts:[{sourceUnitId:'b2',destination:'slides',allowedDestinations:['slides','notes'],owningPageIndexes:[]}]}};
+const project={source:{sha256:'sourcehash',semantic:{inventory:{items:[{id:'b1',text:'First'},{id:'b2',text:'Second'}]}}},outline:structuredClone(raw.slides),pages:3,generationPolicy:defaults};
+const prompt=outlineOwnershipRepairPrompt(project,raw,diagnostic);assert.ok(prompt);
+const repaired=applyOutlineOwnershipRepair(raw,{version:2,assignments:[{sourceUnitId:'b2',pageIndex:1}]},diagnostic);
+assert.deepEqual(repaired.slides[1].sourceUnitIds,['b1','b2']);assert.deepEqual(repaired.selection,raw.selection);assert.equal(repaired.slides.length,raw.slides.length);assert.equal(raw.slides[1].sourceUnitIds.length,1);
+assert.equal(outlineResponseSchema(prompt).properties.assignments.items.oneOf[0].properties.sourceUnitId.const,'b2');
+for(const assignments of [[{sourceUnitId:'b2',pageIndex:0}],[{sourceUnitId:'invented',pageIndex:1}],[{sourceUnitId:'b2',pageIndex:99}],[]])assert.throws(()=>applyOutlineOwnershipRepair(raw,{version:2,assignments},diagnostic));
+assert.equal(outlineOwnershipRepairPrompt(project,raw,{details:{conflicts:[{...diagnostic.details.conflicts[0],owningPageIndexes:[1]}]}}),null);
+const summaryOwnerRaw=structuredClone(raw);summaryOwnerRaw.selection[0]={sourceUnitId:'b2',destination:'summary',reason:'Core message',summaryText:'Concise core message.'};const summaryOwnerError={details:{conflicts:[{sourceUnitId:'b2',destination:'summary',allowedDestinations:['slides','summary'],owningPageIndexes:[]}]}};
+assert.ok(outlineOwnershipRepairPrompt(project,summaryOwnerRaw,summaryOwnerError));const summaryOwnerFixed=applyOutlineOwnershipRepair(summaryOwnerRaw,{version:2,assignments:[{sourceUnitId:'b2',pageIndex:1}]},summaryOwnerError);assert.deepEqual(summaryOwnerFixed.selection,summaryOwnerRaw.selection,'ownership repair must not promote concise summaries to verbatim source');assert.deepEqual(summaryOwnerFixed.slides.map(s=>s.title),summaryOwnerRaw.slides.map(s=>s.title));
+const mixedRaw=structuredClone(raw);mixedRaw.selection.push({sourceUnitId:'b1',destination:'notes',reason:'Secondary'});const mixedDiagnostic={details:{conflicts:[...diagnostic.details.conflicts,{sourceUnitId:'b1',destination:'notes',allowedDestinations:['slides','notes'],owningPageIndexes:[1]}]}};assert.ok(outlineOwnershipRepairPrompt(project,mixedRaw,mixedDiagnostic));const mixedRepair=applyOutlineOwnershipRepair(mixedRaw,{version:2,assignments:[{sourceUnitId:'b2',pageIndex:1},{sourceUnitId:'b1',pageIndex:null}]},mixedDiagnostic);assert.deepEqual(mixedRepair.slides[1].sourceUnitIds,['b2']);assert.deepEqual(mixedRepair.selection,mixedRaw.selection);assert.throws(()=>applyOutlineOwnershipRepair(mixedRaw,{version:2,assignments:[{sourceUnitId:'b2',pageIndex:null},{sourceUnitId:'b1',pageIndex:1}]},mixedDiagnostic));
+recordOutlineConfirmation(project);assert.equal(project.confirmedOutline.titlesFrozen,true);assert.equal(project.confirmedOutline.hash,outlineConfirmationHash(project));
+project.outline[1].title='Changed';assert.notEqual(project.confirmedOutline.hash,outlineConfirmationHash(project));
+const title={id:'native-title',type:'text',semanticRole:'template-title',nativeRef:{shapeId:'1'},content:{text:'Why Simple Alpha Formulas Work'},geometry:{x:0,y:0,width:10868745,height:567035},style:{fontSizePt:37,fontFamily:'Libre Baskerville Bold',color:'#101010'},nativeTextFrame:{wordWrap:false}};
+const slide={nodes:[structuredClone(title)]},nativeProject={templateFidelity:{height:6858000}};fitNativeTitleFrames(nativeProject,slide);
+assert.ok(slide.nodes[0].geometry.height>title.geometry.height);assert.equal(slide.nodes[0].geometry.width,title.geometry.width);assert.deepEqual(slide.nodes[0].style,title.style);assert.equal(slide.nodes[0].templateTitleFrameAdaptation.reason,'native_latin_title_glyph_extent');
+const blocked={nodes:[structuredClone(title),{id:'neighbor',geometry:{x:0,y:567035,width:10868745,height:100000}}]};fitNativeTitleFrames(nativeProject,blocked);assert.equal(blocked.nodes[0].templateTitleFrameAdaptation.status,'blocked');assert.deepEqual(blocked.nodes[0].geometry,title.geometry);
+// A small native section frame reused for the title translation is moved
+// above its pill; the next fit measures the moved frame, not the native one.
+{const {fitNativeTextFrames}=await import('./lib/ppt-native-text-fit.mjs'),{bindTitleHierarchy}=await import('./lib/ppt-title-hierarchy.mjs');
+ const pairProject={generationPolicy:{version:2,language:{mode:'source',body:'both',title:'both'}},templateFidelity:{height:6858000,width:12192000},outline:[{title:'Reading Alpha101-Style Formulas',titlePair:{primary:'Reading Alpha101-Style Formulas',secondary:'解读 Alpha101 风格公式',primaryLanguage:'en'}}]};
+ const pairSlide={id:'s',nodes:[{id:'pill',type:'shape',nativeRef:{shapeId:'2'},content:{label:'Shape 0'},geometry:{x:661475,y:622002,width:867745,height:226219}},
+  {id:'section',type:'text',nativeRef:{shapeId:'3'},templateSlot:{role:'section'},content:{text:'Topic'},geometry:{x:750769,y:666651,width:10779451,height:136922},style:{fontSizePt:14}},
+  {id:'title',type:'text',semanticRole:'template-title',nativeRef:{shapeId:'4'},content:{text:'Reading Alpha101-Style Formulas'},geometry:{x:661475,y:901799,width:10868745,height:372170},style:{fontSizePt:29}}]};
+ fitNativeTextFrames(pairProject,pairSlide);assert.equal(pairSlide.nodes[1].templateTitleFrameAdaptation.status,'blocked','the native label frame is too short for the label text');
+ bindTitleHierarchy(pairProject,pairSlide,0);fitNativeTextFrames(pairProject,pairSlide);
+ const moved=pairSlide.nodes.find(n=>n.id==='section');
+ assert.equal(moved.semanticRole,'title-translation');assert.notEqual(moved.templateTitleFrameAdaptation?.status,'blocked','the moved translation frame is measured where it is');
+ // The pill the label leaves behind goes with it instead of staying empty.
+ assert.ok(!pairSlide.nodes.some(n=>n.id==='pill'));assert.deepEqual(pairSlide.templateOmissions.map(o=>[o.shapeId,o.approvalBasis]),[[2,'title_hierarchy_carrier']]);
+ // Titles show the primary language only unless the policy asks for both (the
+ // user, 2026-10-24): no translation node; the pair remains outline metadata.
+ for(const language of [{mode:'source',body:'both',title:'primary'},{mode:'source',body:'both'}]){
+  const slide={id:'m',nodes:[{id:'title',type:'text',semanticRole:'template-title',nativeRef:{shapeId:'3'},content:{text:'Look-Elsewhere Effect'},geometry:{x:3709399,y:476647,width:7820822,height:785614},style:{fontSizePt:32}}]};
+  const outline=[{title:'Look-Elsewhere Effect',titlePair:{primary:'Look-Elsewhere Effect',secondary:'看别处效应',primaryLanguage:'en'}}];
+  bindTitleHierarchy({...pairProject,generationPolicy:{version:2,language},outline},slide,0);
+  assert.deepEqual(slide.nodes.map(node=>node.id),['title'],'no translation: '+JSON.stringify(language));
+  assert.equal(slide.titleHierarchyOmission.reason,'titles show the primary language only');assert.equal(outline[0].titlePair.secondary,'看别处效应');}}
+console.log('PASS: unified defaults, explicit languages, task/library distinction, constrained ownership repair, confirmation invalidation, native Latin title extent and collision guard, moved translation frame');
+const {skeletonBatches,assembleSkeletonBatches}=await import('./lib/ppt-outline-protocol.mjs');
+const many=Array.from({length:52},(_,i)=>({id:'u'+i,type:'TextBlock',text:'A source paragraph '+i,sectionPath:['Topic'],source_ref:['s'+i]}));
+const grouped={pages:12,pageDecision:{mode:'auto'},generationPolicy:defaults,source:{text:'immutable original',semantic:{inventory:{items:many,relationships:[]}}},originalSourceInventory:{items:many,relationships:[]}};
+const groups=skeletonBatches(grouped);assert.equal(groups.length,3);assert.deepEqual(groups.flatMap(g=>g.allowedIds),many.map(i=>i.id));
+for(const group of groups){const schema=outlineResponseSchema(group.prompt);const branches=schema.properties.selection.items.anyOf;assert.ok(branches.every(b=>b.properties.sourceUnitId.enum.every(id=>group.allowedIds.includes(id))));}
+const responses=groups.map((group,index)=>({version:2,selection:group.allowedIds.map(sourceUnitId=>({sourceUnitId,destination:'slides',reason:'Primary topic'})),slides:[...(index===0?[{title:'Cover',focus:'Opening',sourceUnitIds:[],role:'cover'}]:[]),{title:'Topic '+index,focus:'Source question',sourceUnitIds:group.allowedIds}]}));
+assert.equal(assembleSkeletonBatches(grouped,groups,responses).selection.length,many.length);
+console.log('PASS: notes planning groups retain complete immutable source identity, scoped disposition IDs and assembled global ledger');
+const {selectionConstraints,compileContentSelection}=await import('./lib/ppt-content-selection.mjs');
+const pairItems=[{id:'eq',type:'EquationBlock',text:'h = x',source_ref:[]},{id:'en',type:'MechanismBlock',text:'The state tracks recent values.',languagePairId:'pair',source_ref:[]},{id:'zh',type:'MechanismBlock',text:'状态跟踪最近的数值。',languagePairId:'pair',source_ref:[]}];
+const relation={id:'definition',unitIds:['eq','en','zh']};
+const optional={generationPolicy:{version:1,detail:'balanced',content:'overview',details:'notes',knowledge:'source_only',language:{mode:'source',body:'both'}},source:{text:'immutable',semantic:{inventory:{items:pairItems,relationships:[relation]}}}};
+assert.ok(selectionConstraints(optional).every(rule=>rule.allowedDestinations.includes('notes')),'a whole secondary bilingual relation may move together');
+const protectedPair=structuredClone(optional);protectedPair.source.semantic.inventory.items[1].mustDisplay=true;
+assert.ok(selectionConstraints(protectedPair).every(rule=>!rule.allowedDestinations.includes('notes')),'main definition propagates to equation and both languages BEFORE planning');
+assert.throws(()=>compileContentSelection(optional,{selection:[{sourceUnitId:'eq',destination:'notes',reason:'Secondary'},{sourceUnitId:'en',destination:'slides',reason:'Main'},{sourceUnitId:'zh',destination:'notes',reason:'Secondary'}],slides:[{sourceUnitIds:[]},{sourceUnitIds:['en']},{sourceUnitIds:[]}]}),/Both source languages/);
+console.log('PASS: relational disposition closure and paired bilingual notes cannot split a definition or silently drop one visible language');
+const {outlineRelationRepairPrompt,applyOutlineRelationRepair}=await import('./lib/ppt-outline-protocol.mjs');
+const relationRaw={version:2,selection:[{sourceUnitId:'eq',destination:'notes',reason:'Secondary'},{sourceUnitId:'en',destination:'slides',reason:'Main'},{sourceUnitId:'zh',destination:'slides',reason:'Main'}],slides:[{title:'Cover',focus:'Opening',sourceUnitIds:[],role:'cover'},{title:'State',focus:'Interpretation',sourceUnitIds:['en','zh']},{title:'Conclusion',focus:'Close',sourceUnitIds:[]}]};
+const relError={details:{sourceUnitIds:['eq','en','zh']}};
+const relPrompt=outlineRelationRepairPrompt(optional,relationRaw,relError);assert.ok(relPrompt);assert.ok(outlineResponseSchema(relPrompt).properties.destination.enum.includes('notes'));
+const relationFixed=applyOutlineRelationRepair(optional,relationRaw,relError,{version:2,destination:'slides',pageIndex:1});assert.equal(relationFixed.slides.length,3);assert.deepEqual(relationFixed.slides[1].sourceUnitIds,['eq','en','zh']);assert.deepEqual(relationFixed.slides.map(s=>s.title),relationRaw.slides.map(s=>s.title));assert.ok(compileContentSelection(optional,relationFixed));
+assert.throws(()=>applyOutlineRelationRepair(optional,relationRaw,relError,{version:2,destination:'slides',pageIndex:0}));assert.throws(()=>applyOutlineRelationRepair(protectedPair,relationRaw,relError,{version:2,destination:'notes',pageIndex:null}));
+const {outlineRelationBatchRepairPrompt,applyOutlineRelationBatchRepair}=await import('./lib/ppt-outline-protocol.mjs');
+const multiple=structuredClone(optional);multiple.source.semantic.inventory.items.push(...pairItems.map(item=>({...item,id:item.id+'2',languagePairId:item.languagePairId?'pair2':undefined})));multiple.source.semantic.inventory.relationships.push({id:'definition2',unitIds:['eq2','en2','zh2']});
+const multiRaw=structuredClone(relationRaw);multiRaw.selection.push(...relationRaw.selection.map(entry=>({...entry,sourceUnitId:entry.sourceUnitId+'2'})));multiRaw.slides[2].sourceUnitIds=['en2','zh2'];
+const multiError={details:{languagePairConflicts:[{sourceUnitIds:['en','zh']},{sourceUnitIds:['en2','zh2']}]}};
+const multiPrompt=outlineRelationBatchRepairPrompt(multiple,multiRaw,multiError);assert.ok(multiPrompt);assert.equal(outlineResponseSchema(multiPrompt).properties.assignments.minItems,2);
+const multiDelta={version:2,assignments:[{groupIndex:0,destination:'slides',pageIndex:1},{groupIndex:1,destination:'notes',pageIndex:null}]};
+const multiFixed=applyOutlineRelationBatchRepair(multiple,multiRaw,multiError,multiDelta);assert.ok(compileContentSelection(multiple,multiFixed));assert.equal(multiFixed.slides.length,multiRaw.slides.length);assert.deepEqual(multiFixed.slides.map(({sourceUnitIds,...rest})=>rest),multiRaw.slides.map(({sourceUnitIds,...rest})=>rest));assert.deepEqual(multiple.source.semantic.inventory.items.slice(0,3),pairItems);
+for(const assignments of [[multiDelta.assignments[0],multiDelta.assignments[0]],[{...multiDelta.assignments[0],groupIndex:99},multiDelta.assignments[1]],[{...multiDelta.assignments[0],pageIndex:null},multiDelta.assignments[1]],[multiDelta.assignments[0],{...multiDelta.assignments[1],pageIndex:2}]])assert.throws(()=>applyOutlineRelationBatchRepair(multiple,multiRaw,multiError,{version:2,assignments}));
+const connected=structuredClone(multiple);connected.source.semantic.inventory.relationships.push({id:'shared',unitIds:['eq','eq2']});const mergedPrompt=outlineRelationBatchRepairPrompt(connected,multiRaw,multiError);assert.equal(outlineResponseSchema(mergedPrompt).properties.assignments.minItems,1);const merged=applyOutlineRelationBatchRepair(connected,multiRaw,multiError,{version:2,assignments:[{groupIndex:0,destination:'slides',pageIndex:1}]});assert.equal(merged.slides[1].sourceUnitIds.length,6);assert.ok(compileContentSelection(connected,merged));
+console.log('PASS: batch bilingual repair fixes disjoint groups, merges overlapping dependency closures and rejects duplicate/unknown groups and invalid destination-page combinations');
+const tableProject={generationPolicy:defaults,source:{text:'source',semantic:{inventory:{items:[{id:'table',type:'TableBlock',text:'table',rows:[['H'],['one'],['two'],['three'],['four'],['five']],source_ref:[]}],relationships:[]}}}};
+const tableRaw={version:2,selection:[{sourceUnitId:'table',destination:'summary',reason:'Chosen rows',rowIndices:[1,5]}],slides:[{sourceUnitIds:[]},{sourceUnitIds:[],sourceArtifactRanges:[{sourceUnitId:'table',rowStart:1,rowEnd:3}]},{sourceUnitIds:[]}]};
+const tableLedger=compileContentSelection(tableProject,tableRaw);assert.deepEqual(tableLedger.entries[0].sourceCellMap.map(row=>row[0].row),[0,1,5]);assert.throws(()=>compileContentSelection(tableProject,{...tableRaw,slides:[{sourceUnitIds:[]},{sourceUnitIds:[],sourceArtifactRanges:[{sourceUnitId:'table',rowStart:4,rowEnd:6}]},{sourceUnitIds:[]}]}));
+console.log('PASS: related-source delta keeps titles and N; table summary ranges use selected-row positions while cell map retains exact original coordinates');
+const {claimAuditRegistry,normalizeClaimAudit}=await import('./lib/ppt-claim-semantics.mjs'),{reviewBatches}=await import('./lib/ppt-review-batches.mjs');
+const auditSlides=Array.from({length:20},(_,i)=>({id:'audit'+i,title:'Topic',sourceUnitIds:['source'+i],nodes:[{id:'explain'+i,type:'text',semanticRole:'source-explanation',content:{text:'Supported explanation '+i},geometry:{x:0,y:0,width:1000000,height:500000},style:{fontSizePt:18}}]}));
+const auditProject={prompt:'Supported content',source:{text:'Original',semantic:{inventory:{items:auditSlides.map((s,i)=>({id:'source'+i,type:'MechanismBlock',text:'Supported explanation '+i,source_ref:[]})),relationships:[]}}},deck:{slides:auditSlides},outline:auditSlides.map(s=>({id:s.id,title:s.title,sourceUnitIds:s.sourceUnitIds})),planning:{slidePlan:[]}};
+const audits=reviewBatches(auditProject),fullClaims=claimAuditRegistry(auditProject);
+assert.equal(claimAuditRegistry(audits.at(-1).project).entries.length,0,'global findings do not duplicate all page-level claim audit output');
+const partitionClaims=audits.slice(0,-1).flatMap(batch=>claimAuditRegistry(batch.project).entries);assert.equal(partitionClaims.length,fullClaims.entries.length);assert.deepEqual(partitionClaims.map(e=>e.id).sort(),fullClaims.entries.map(e=>e.id).sort());
+assert.throws(()=>normalizeClaimAudit({registryHash:fullClaims.registryHash,status:'complete',checks:[]},auditProject),'unscoped final gate still rejects missing page-level claims');
+console.log('PASS: page audits cover each original claim exactly once; compact global audit preserves final full-registry completeness gate');
+const {outlineMetadataRepairPrompt,applyOutlineMetadataRepair,compileSkeleton}=await import('./lib/ppt-outline-protocol.mjs');
+const badMetadata=structuredClone(raw);badMetadata.slides[1].focus='A long copied paragraph. '.repeat(30);
+let metadataError;try{compileSkeleton(project,badMetadata);}catch(e){metadataError=e;}
+assert.equal(metadataError.details.metadataConflicts.length,1);assert.equal(metadataError.details.metadataConflicts[0].field,'focus');
+const metadataPrompt=outlineMetadataRepairPrompt(project,badMetadata,metadataError);assert.ok(metadataPrompt);assert.equal(outlineResponseSchema(metadataPrompt).properties.updates.minItems,1);
+const compactMetadata=applyOutlineMetadataRepair(badMetadata,metadataError,{version:2,updates:[{pageIndex:1,field:'focus',text:'Explain the source mechanism.'}]});
+assert.deepEqual(compactMetadata.selection,badMetadata.selection);assert.deepEqual(compactMetadata.slides.map(s=>s.sourceUnitIds),badMetadata.slides.map(s=>s.sourceUnitIds));assert.deepEqual(compactMetadata.slides.map(s=>s.title),badMetadata.slides.map(s=>s.title));assert.equal(compactMetadata.slides.length,badMetadata.slides.length);
+assert.throws(()=>applyOutlineMetadataRepair(badMetadata,metadataError,{version:2,updates:[{pageIndex:1,field:'title',text:'Unlisted title'}]}));assert.throws(()=>applyOutlineMetadataRepair(badMetadata,metadataError,{version:2,updates:[{pageIndex:1,field:'focus',text:'x'.repeat(361)}]}));
+console.log('PASS: metadata length errors retain precise diagnostics and a model-only bounded field repair preserves all source, titles, selection and pages');
+const {taskEligible}=await import('./lib/ppt-library.mjs');
+assert.equal(taskEligible({status:'completed',deck,publishedRevision:1}),true,'successful generation history remains separate from its published file');
+assert.equal(taskEligible({status:'outlining',outline:[{}]}),true);
+assert.equal(taskEligible({status:'quality_blocked',deck,publishedRevision:1}),true);
+assert.equal(libraryEligible({status:'quality_blocked',deck,publishedRevision:1}),true,'retained published file and failed latest edit are independent facets, not lost from either view');
+console.log('PASS: all file/folder counts use published eligibility; task center includes unsuccessful edits even while a prior file remains available');
+const api=(await import('./lib/ppt-api.mjs'))._internals;
+const confirmedPage={id:'slide_body',title:'Known facts / 已知事实',role:'mechanism',focus:'Explain the known facts',refs:[]};
+const confirmedProject={pages:3,prompt:'Known fact',confirmedOutline:{titlesFrozen:true},outline:[{id:'slide_cover',title:'Subject'},confirmedPage,{id:'slide_end',title:'Conclusion'}]};
+let titleAttempts=0;
+const titleRepair=await api.writeWithContractRepair({prompt:'Write the confirmed page.',nodeKey:'content:slide_body',call:async()=>({title:++titleAttempts===1?'Unrequested replacement':confirmedPage.title,bullets:['Known fact']}),normalize:value=>api.normalizeSlide(value,confirmedPage,confirmedProject)});
+assert.equal(titleAttempts,1);assert.equal(titleRepair.content.title,confirmedPage.title);assert.deepEqual(titleRepair.content.bullets,['Known fact']);assert.equal(titleRepair.content.writerCorrections[0].before,'Unrequested replacement');assert.equal(confirmedProject.pages,3);
+console.log('PASS: an actual writer attempting to rename a confirmed title gets a deterministic correction without a model retry; the confirmed title and N stay frozen');
+
+const {supplementaryNativeMedia}=await import('./lib/ppt-media-preserving-layout.mjs');const spareFit={capacity_ok:true,canvas:{x:0,y:0,width:10000000,height:6000000},boxes:[{x:0,y:0,width:4000000,height:500000}],componentInstances:[{id:'point-bound',type:'image'}]};assert.equal(supplementaryNativeMedia({},0,spareFit),spareFit);assert.equal(spareFit.componentInstances.length,1);console.log('PASS: empty canvas space cannot create orphan supplementary illustrations beyond actual point-bound instances');
+
+const {outlineSummaryRepairPrompt,applyOutlineSummaryRepair}=await import('./lib/ppt-outline-protocol.mjs');const summaryProject={generationPolicy:defaults,source:{text:'Original',semantic:{inventory:{items:[{id:'a',type:'DefinitionBlock',text:'A model is conditional. It must not trade without validation.',source_ref:[]},{id:'b',type:'MechanismBlock',text:'It scores signals. Never assume independence.',source_ref:[]}],relationships:[]}}}};const summaryRaw={version:2,selection:[{sourceUnitId:'a',destination:'summary',reason:'Main',sentenceIndices:[0]},{sourceUnitId:'b',destination:'summary',reason:'Main',sentenceIndices:[0]}],slides:[{title:'Cover',focus:'Opening',sourceUnitIds:[]},{title:'Model',focus:'Validation',sourceUnitIds:['a','b']},{title:'Close',focus:'Conclusion',sourceUnitIds:[]}]};let summaryError;try{compileContentSelection(summaryProject,summaryRaw);}catch(error){summaryError=error;}assert.equal(summaryError.details.summaryConflicts.length,2);const summaryPrompt=outlineSummaryRepairPrompt(summaryProject,summaryRaw,summaryError);assert.equal(outlineResponseSchema(summaryPrompt).properties.updates.minItems,2);const summaryDelta={version:2,updates:[{sourceUnitId:'a',destination:'slides',reason:'Full definition and condition'},{sourceUnitId:'b',destination:'summary',reason:'Retain scope',summaryText:'It scores signals; never assume independence.'}]};const summaryFixed=applyOutlineSummaryRepair(summaryProject,summaryRaw,summaryError,summaryDelta);assert.ok(compileContentSelection(summaryProject,summaryFixed));assert.deepEqual(summaryFixed.slides,summaryRaw.slides);assert.throws(()=>applyOutlineSummaryRepair(summaryProject,summaryRaw,summaryError,{version:2,updates:[summaryDelta.updates[0],summaryDelta.updates[0]]}));
+const bilingualProject={generationPolicy:defaults,source:{text:'# Risk Models | 风险模型',semantic:{inventory:{items:[{id:'en',text:'The model requires validation.'},{id:'zh',text:'模型需要验证。'}]}}}};const bilingualRaw={version:2,slides:[{title:'Risk Models',focus:'Cover',sourceUnitIds:[]},{title:'Validation',focus:'Main',sourceUnitIds:['en','zh']},{title:'Conclusion',focus:'Close',sourceUnitIds:[]}]};const titleChecked=compileSkeleton(bilingualProject,bilingualRaw);assert.deepEqual(titleChecked.slides.map(page=>page.title),['Risk Models','Validation'].concat(['Conclusion']),'round 7 B1: a bilingual source accepts single-language topic titles');assert.deepEqual(titleChecked.slides.map(page=>page.sourceUnitIds),bilingualRaw.slides.map(page=>page.sourceUnitIds));console.log('PASS: all incomplete summary conditions are repaired together without replacing pages; bilingual sources keep single-language topic titles (deck language) with both languages in the body');
+
+const ownershipSchema=outlineResponseSchema(outlineOwnershipRepairPrompt(project,mixedRaw,mixedDiagnostic));
+assert.ok(ownershipSchema.properties.assignments.items.oneOf.some(branch=>branch.properties.sourceUnitId.const==='b1'&&branch.properties.pageIndex.type==='null'));
+assert.ok(ownershipSchema.properties.assignments.items.oneOf.some(branch=>branch.properties.sourceUnitId.const==='b2'&&branch.properties.pageIndex.type==='integer'&&!branch.properties.pageIndex.enum.includes(null)));
+
+const {retainOutlineRepair,resumeOutlineRepair}=await import('./lib/ppt-outline-protocol.mjs');
+const checkpoint=retainOutlineRepair(mixedRepair,'complete-source-policy-model-template-context');
+assert.deepEqual(resumeOutlineRepair(checkpoint,checkpoint.planningIdentity),mixedRepair);
+assert.equal(resumeOutlineRepair(checkpoint,'changed-source-policy-or-model'),null);
+checkpoint.executionPlan.slides[1].title='Tampered stale title';assert.equal(resumeOutlineRepair(checkpoint,checkpoint.planningIdentity),null);
+assert.equal(retainOutlineRepair({slides:[]},'x'),null);
+console.log('PASS: source/model/policy/template-bound repair checkpoints reject identity mismatch or tampering and never imply outline acceptance');
+
+const rangedProject={source:{semantic:{inventory:{items:[{id:'table_explicit',type:'TableBlock',must_preserve_structure:true,text:'Original values',rows:[['Metric','Value'],['Cost','1'],['Risk','2']]}]}}}};
+const rangedRaw={version:2,slides:[{title:'Cover',focus:'Subject',sourceUnitIds:[]},{title:'Table',focus:'Original complete rows',sourceUnitIds:[],sourceArtifactRanges:[{sourceUnitId:'table_explicit',rowStart:1,rowEnd:3}]},{title:'Conclusion',focus:'Source conclusion',sourceUnitIds:[]}]};
+const rangedBefore=structuredClone(rangedRaw),rangedCompiled=compileSkeleton(rangedProject,rangedRaw);assert.deepEqual(rangedCompiled.slides[1].sourceUnitIds,['table_explicit']);assert.deepEqual(rangedCompiled.slides[1].sourceArtifactRanges,rangedRaw.slides[1].sourceArtifactRanges);assert.deepEqual(rangedRaw,rangedBefore);
+for(const ref of [{sourceUnitId:'invented',rowStart:1,rowEnd:3},{sourceUnitId:'table_explicit',rowStart:1,rowEnd:99}]){const invalid=structuredClone(rangedRaw);invalid.slides[1].sourceArtifactRanges=[ref];assert.throws(()=>compileSkeleton(rangedProject,invalid));}
+console.log('PASS: valid explicit table ranges compile their existing primary owner without changing source, rows, titles or N; unknown IDs and out-of-bounds rows remain blocked');
+
+const {pruneEmptySelectedPages}=await import('./lib/ppt-outline-protocol.mjs');
+const sparseNotes={...rangedProject,generationPolicy:{content:'overview',details:'notes',knowledge:'source_only'}};
+const extra={...rangedCompiled,selection:[{sourceUnitId:'table_explicit',destination:'slides'}],slides:[rangedCompiled.slides[0],rangedCompiled.slides[1],{title:'Empty',focus:'No selected source owner',role:'content',sourceUnitIds:[]},rangedCompiled.slides[2]]};
+const pruned=pruneEmptySelectedPages(sparseNotes,extra);assert.equal(pruned.slides.length,3);assert.equal(pruned.planningPrunedPages.length,1);assert.deepEqual(pruned.selection,extra.selection);assert.deepEqual(pruned.slides[1].sourceArtifactRanges,extra.slides[1].sourceArtifactRanges);
+for(const role of ['summary','closing','conclusion']){const interior=structuredClone(extra);interior.slides[2].role=role;const result=pruneEmptySelectedPages(sparseNotes,interior);assert.equal(result.slides.length,3);assert.deepEqual(result.selection,interior.selection,'removing an unowned interior recap cannot alter source dispositions');}
+assert.equal(pruneEmptySelectedPages({...sparseNotes,requestedOutline:extra.slides},extra),extra);assert.equal(pruneEmptySelectedPages({...sparseNotes,generationPolicy:{...sparseNotes.generationPolicy,knowledge:'source_plus_explanation'}},extra),extra);
+const locked=structuredClone(extra);locked.slides[2].titleLocked=true;assert.equal(pruneEmptySelectedPages(sparseNotes,locked),locked);
+console.log('PASS: compact source-only notes planning removes unowned content placeholders before confirmation while keeping every source disposition/range, structural page and locked/user outline');
+const {repeatedFocusMetadataError}=await import('./lib/ppt-outline-protocol.mjs');
+const focusIssue={code:'outline_repeated_claim',details:{pageIndex:1,duplicatesPageIndex:0}};const focusDiagnostic=repeatedFocusMetadataError([focusIssue]);assert.equal(focusDiagnostic.details.metadataConflicts[0].field,'focus');const focused=applyOutlineMetadataRepair(rangedCompiled,focusDiagnostic,{version:2,updates:[{pageIndex:1,field:'focus',text:'Retain the original Cost and Risk rows'}]});assert.deepEqual(focused.slides.map(page=>page.sourceUnitIds),rangedCompiled.slides.map(page=>page.sourceUnitIds));assert.deepEqual(focused.slides[1].sourceArtifactRanges,rangedCompiled.slides[1].sourceArtifactRanges);assert.equal(focused.slides.length,rangedCompiled.slides.length);assert.equal(repeatedFocusMetadataError([{code:'outline_repeated_claim'}]),null);
+console.log('PASS: duplicate-focus repair is metadata-only and keeps frozen source owners, row ranges, titles and page count');
+
+const {selectionSource:selectVisibleSource}=await import('./lib/ppt-content-selection.mjs');
+const languageUnits={items:[{id:'primary',type:'ParagraphBlock',text:'Never feed raw price levels.',languagePairId:'pair',languageRole:'primary'},{id:'translation',type:'ParagraphBlock',text:'不要使用原始价格水平。',languagePairId:'pair',languageRole:'translation'},{id:'optional',type:'ParagraphBlock',text:'Optional detail.'}],relationships:[]};
+const languageLedger={hash:'confirmed-ledger',entries:[{sourceUnitId:'primary',destination:'slides'},{sourceUnitId:'translation',destination:'summary',sentenceIndices:[0],unitHash:'original'},{sourceUnitId:'optional',destination:'notes'}]};
+const languageProject={generationPolicy:{content:'overview',details:'notes',language:{mode:'source'}},source:{semantic:{inventory:languageUnits}},originalSourceInventory:languageUnits};
+const visibleLanguage=selectVisibleSource(languageProject,languageLedger);assert.equal(visibleLanguage.semantic.inventory.items[0].must_preserve_structure,true);assert.equal(visibleLanguage.semantic.inventory.items[1].must_preserve_structure,true);assert.equal(visibleLanguage.semantic.inventory.items[2].must_preserve_structure,false);assert.equal(languageUnits.items[0].must_preserve_structure,undefined);assert.equal(selectVisibleSource({...languageProject,generationPolicy:{...languageProject.generationPolicy,language:{mode:'output',locale:'zh'}}},languageLedger).semantic.inventory.items[0].sourceLanguageBinding,undefined);
+console.log('PASS: selected source-language prose and its translated summary both bind visible objects before capacity planning; notes and explicit single-language output retain their distinct contracts, immutable original unchanged.');
+
+const longMetadataReason='Restore complete source object as slides to fix invalid sentence selection and satisfy the overview and notes contract.';assert.ok(longMetadataReason.length>80&&longMetadataReason.length<240);
+const metadataBound=applyOutlineSummaryRepair(summaryProject,summaryRaw,summaryError,{version:2,updates:[{sourceUnitId:'a',destination:'slides',reason:longMetadataReason},{sourceUnitId:'b',destination:'summary',reason:longMetadataReason,summaryText:'It scores signals; never assume independence.'}]});assert.ok(compileContentSelection(summaryProject,metadataBound));
+console.log('PASS: summary-kind deltas replace conflicting old fields, reject ambiguous new fields, and accept bounded non-visible metadata without relaxing source facts or conditions.');
+
+const overrun=applyOutlineSummaryRepair(summaryProject,summaryRaw,summaryError,{version:2,updates:[{sourceUnitId:'a',destination:'slides',reason:'Keep the complete original text here. '.repeat(8)},{sourceUnitId:'b',destination:'slides',reason:'Complete original'}]});
+assert.ok(overrun.selection.find(e=>e.sourceUnitId==='a').reason.length<=240,'an over-long internal reason is trimmed at a word boundary');assert.ok(compileContentSelection(summaryProject,overrun));
+console.log('PASS: an over-long internal summary reason is trimmed, not a failure.');
+
+const explicitTitleProject={...confirmedProject,confirmedOutline:{titlesFrozen:false}};assert.notEqual(api.normalizeSlide({title:'Requested new topic',bullets:['Known fact']},confirmedPage,explicitTitleProject).title,confirmedPage.title,'an explicitly reopened title stays editable');

@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {paginateSourceLines,inspectSourceLineCoverage,materializeSourceLineRange} from './lib/ppt-source-line-ranges.mjs';
+import {sourceComponent,measureComponent,INCH} from './lib/ppt-density-capacity.mjs';
+import {BUILT_INS,snapshotTemplate} from './lib/ppt-template.mjs';
+import {bindSourceArtifacts} from './lib/ppt-source-artifacts.mjs';
+import {inspectObjectIntegrity} from './lib/ppt-object-integrity.mjs';
+import {renderPptx} from './lib/ppt-render.mjs';import {localPptRuntime} from './test/ppt-local-runtime.mjs';
+
+const labels=['User','LLM planning','Read skill instructions','Generate slide outline','Generate copy','Generate visuals','Write code / PPTX objects','Execute code','Create artifact','Render artifact','Inspect slides','Detect overflow','Modify','Rerender','Export'];
+const text=labels.map((label,i)=>`${i+1}. ${label}`).join('\n'),item={id:'serial-chain',type:'ProcessBlock',must_preserve_structure:true,text,diagramSource:{kind:'text-flow',relation:'ordered',text:labels.join('\n')}};
+const original=JSON.stringify(item),geometry={x:0,y:0,width:10*INCH,height:4.1*INCH};
+const fits=ref=>measureComponent(sourceComponent(materializeSourceLineRange(item,ref)),geometry,18).height<=geometry.height;
+assert.equal(fits({}),false,'the complete process exceeds the retained 18pt body');
+const ranges=paginateSourceLines(item,fits);
+assert.equal(ranges.length,2);assert.ok(Math.abs((ranges[0].lineEnd-ranges[0].lineStart)-(ranges[1].lineEnd-ranges[1].lineStart))<=1,'avoid a sparse three-step terminal page');assert.ok(ranges.every(fits));
+const instances=ranges.map(ref=>({...ref,text:materializeSourceLineRange(item,ref).text}));
+assert.equal(instances.map(i=>i.text).join('\n'),text);assert.equal(inspectSourceLineCoverage(item,instances).complete,true);
+assert.equal(inspectSourceLineCoverage(item,[...instances].reverse()).complete,false);assert.equal(inspectSourceLineCoverage(item,instances.slice(0,1)).complete,false);
+const capped=ref=>(ref.lineEnd??15)-(ref.lineStart??0)<=12;
+assert.deepEqual(paginateSourceLines({...item,type:'CodeBlock'},capped).map(r=>r.lineEnd-r.lineStart),[12,3],'code/function boundary behavior remains intact');
+const partial=paginateSourceLines(item,capped,{lineStart:2,lineEnd:15});assert.deepEqual(partial.map(r=>[r.lineStart,r.lineEnd]),[[2,9],[9,15]],'balance only the selected contiguous scope');
+const uneven=ref=>{const start=ref.lineStart??0,end=ref.lineEnd??15;return end-start<=12&&(start===0||start===12);};
+assert.deepEqual(paginateSourceLines(item,uneven).map(r=>[r.lineStart,r.lineEnd]),[[0,12],[12,15]],'never balance into a range rejected by the actual capacity contract');
+assert.equal(JSON.stringify(item),original);
+const p={id:'balanced-process',pages:4,source:{sha256:'unchanged',semantic:{inventory:{items:[item]}}},template:'violet',templateSpec:snapshotTemplate(BUILT_INS.find(t=>t.id==='violet')),generationPolicy:{content:'full_source',knowledge:'source_only',language:{mode:'source'}},outline:[{id:'cover'},...ranges.map((ref,i)=>({id:'part'+i,sourceUnitIds:[item.id],sourceArtifactRanges:[ref]})),{id:'closing'}],planning:{slidePlan:ranges.map((ref,i)=>({slideId:'part'+i,sourceArtifacts:[ref]}))}};
+const slides=ranges.map((ref,i)=>{const slide={id:'part'+i,title:'Serial chain',nodes:[]};bindSourceArtifacts(p,slide,[ref],i+1);assert.equal(slide.sourceArtifactFit.fontSizePt,18);assert.equal(slide.sourceArtifactFit.capacity_ok,true);return slide;});
+p.deck={slides:[{id:'cover',title:'Workflow',nodes:[]},...slides,{id:'closing',title:'Thanks for watching!',nodes:[]}]};assert.deepEqual(inspectObjectIntegrity(p).issues,[]);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-process-balance-'));
+try{const result=await renderPptx(p,localPptRuntime(dir).io);assert.equal(result.exportVerification.status,'passed');console.log('Balanced process pagination: exact original order/scope, both 18pt pages fit, rejected geometry and missing/reordered source remain blocked; editable PPTX export passed.');}finally{fs.rmSync(dir,{recursive:true,force:true});}

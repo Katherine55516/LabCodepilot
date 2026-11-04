@@ -1,0 +1,14 @@
+import assert from'node:assert/strict';
+import{classifyTemplatePage,roleBasedTemplateMap}from'./lib/ppt-template-roles.mjs';
+const size={width:12191695,height:6858000};
+const text=(value,pt,y,height=200000)=>({type:'text',content:{text:value},style:{fontSizePt:pt},geometry:{x:661475,y,width:6296860,height}});
+const cover={nodes:[text('PROCESS IMPROVEMENT PROPOSAL',10,2377182),text('DRIVING OPERATIONAL EXCELLENCE',44.5,2645073,1141214),text('Transforming our workflows to unlock efficiency, reduce costs, and deliver exceptional results.',13,4034334,496094)]};
+assert.equal(classifyTemplatePage(cover,size).role,'cover');
+const content={nodes:[text('Cycle time',32.5,1301055),text('35%',65,2586831),text('A reported metric and its source explanation remain a content page.',13,3803253,1240234)]};
+assert.equal(classifyTemplatePage(content,size).role,'content');
+const metric={nodes:[text('BENEFITS',10,2377182),text('35%',65,2645073,1141214),text('A single prominently displayed metric does not make this content page a cover.',13,4034334,496094)]};
+assert.equal(classifyTemplatePage(metric,size).role,'content');
+const profile=s=>({semantic:{pageRole:classifyTemplatePage(s,size),totalVisualCapacity:200}});
+assert.equal(roleBasedTemplateMap(2,3,[profile(content),profile(cover)])[0],1,'choose the actual cover, independent of original index');
+assert.throws(()=>roleBasedTemplateMap(1,3,[profile(content)]),/template_role_unavailable: cover/,'do not silently treat any content page as a cover');
+console.log('PASS descriptive cover recognition, metric negative and semantic cover scheduling');

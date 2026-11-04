@@ -1,0 +1,215 @@
+# ARCHITECTURE.md
+
+AI Native Lab 是多模型 AI Agent 桌面客户端。Electron 40 做外壳，Next.js 16 (App Router) 做前端和 API 层，better-sqlite3 做本地持久化，通过 Claude Agent SDK 与 AI 服务商交互。
+
+## 目录结构
+
+```
+src/
+├── app/            # Next.js App Router — 页面 + API 路由
+│   ├── api/        #   52 个 REST 端点（chat, media, files, plugins, settings …）
+│   ├── chat/       #   聊天页（主界面）
+│   ├── plugins/    #   插件 / MCP 管理
+│   ├── settings/   #   /settings 兼容层（设置本体是全局弹窗 SettingsDialog，见下）
+│   ├── bridge/     #   IM Bridge 设置
+│   ├── gallery/    #   图片画廊
+│   └── …
+├── components/     # React 组件（按功能分目录）
+│   ├── ui/         #   Radix 基础组件 (Button, Dialog, Tabs …)
+│   ├── chat/       #   聊天界面 (MessageList, CodeBlock, ImageThumbnail …)
+│   ├── ai-elements/#   AI 响应渲染 (artifact, reasoning, tool, task …)
+│   ├── layout/     #   布局 (AppShell, Header, NavRail, ChatListPanel …)
+│   ├── plugins/    #   插件管理 UI
+│   ├── settings/   #   设置面板（SettingsDialog = 挂在 AppShell 的全局弹窗，
+│   │               #   由 'open-settings' 事件唤起；/settings 路由只做深链转发）
+│   ├── bridge/     #   Bridge 设置 UI
+│   ├── skills/     #   技能市场
+│   ├── project/    #   项目文件树
+│   └── gallery/    #   画廊视图
+├── lib/            # 核心业务逻辑
+│   ├── db.ts               # SQLite 数据库（schema 定义 + CRUD）
+│   ├── claude-client.ts    # Claude Agent SDK 封装、消息流
+│   ├── stream-session-manager.ts  # SSE 流生命周期管理
+│   ├── conversation-registry.ts   # 活跃 SDK 会话全局注册
+│   ├── image-generator.ts  # Gemini/Anthropic 图片生成
+│   ├── job-executor.ts     # 批量图片生成任务执行器
+│   ├── files.ts            # 文件系统浏览和预览
+│   ├── claude-session-parser.ts   # 解析 Claude CLI .jsonl 会话
+│   ├── platform.ts         # 平台检测 (macOS/Windows/Linux)
+│   ├── error-classifier.ts # 错误分类（16 类结构化错误）
+│   ├── provider-doctor.ts  # Provider 诊断引擎（5 探针 + 修复动作）
+│   ├── runtime-log.ts      # console 环形缓冲（200 条，自动脱敏）
+│   └── bridge/             # IM Bridge 子系统（见下方）
+├── hooks/          # React Hooks (useSSEStream, useImageGen, useTranslation …)
+├── types/          # TypeScript 类型
+│   ├── index.ts            # 所有业务类型 (ChatSession, Message, MCPServerConfig …)
+│   └── electron.d.ts       # Electron contextBridge API 类型
+└── i18n/           # 国际化
+    ├── en.ts               # 英文
+    └── zh.ts               # 中文
+
+electron/
+├── main.ts         # Electron 主进程（窗口、IPC、Utility Process）
+├── logger.ts       # 主进程文件日志（app.getPath('logs')/main.log、console tee、崩溃捕获、密钥脱敏、滚动）
+├── log-scrub.ts    # 日志密钥脱敏（纯函数，单测覆盖）
+└── preload.ts      # contextBridge 暴露（install API, updater API, logs API）
+```
+
+## 数据流
+
+```
+用户输入 → MessageInput 组件
+         → POST /api/chat/messages
+         → claude-client.ts（创建 SDK conversation）
+         → Claude Agent SDK SSE 流
+         → stream-session-manager.ts 管理流
+         → useSSEStream hook 订阅
+         → MessageList 渲染
+         → db.ts 持久化到 SQLite
+```
+
+**Bridge 数据流（远程 IM 控制）：**
+```
+Telegram/Feishu 消息
+  → Adapter 长轮询/WebSocket 接收
+  → channelRouter 路由到 AI Native Lab session
+  → conversationEngine 调用 SDK
+  → SDK SSE 响应
+  → deliveryLayer 格式化 + 分片
+  → Adapter 发送回 IM
+```
+
+## 数据库（SQLite）
+
+Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）：
+
+| 表 | 用途 |
+|----|------|
+| `chat_sessions` | 聊天会话元数据 |
+| `messages` | 消息（content 为 JSON 数组） |
+| `settings` | 键值设置 |
+| `tasks` | SDK TodoWrite 任务项 |
+| `api_providers` | API 提供商配置（Anthropic, OpenAI …） |
+| `media_generations` | 生成的图片/媒体 |
+| `media_tags` | 媒体标签 |
+| `media_jobs` | 批量图片生成任务 |
+| `media_job_items` | 批量任务中的单个项 |
+| `media_context_events` | 批量任务上下文同步 |
+| `channel_bindings` | Bridge: IM 频道 → AI Native Lab 会话绑定 |
+| `channel_offsets` | Bridge: 轮询偏移量水位线 |
+| `test_stats_events` | 测试模块使用统计事件流水（追加式，聚合口径可重算） |
+
+启用 WAL 模式 + 外键约束。数据目录：`~/.codepilot/`。
+
+## Bridge 子系统
+
+`src/lib/bridge/` — 将外部 IM（Telegram、飞书）连接到 AI Native Lab 会话。
+
+**核心组件：**
+- `channel-adapter.ts` — 适配器抽象基类 + 注册工厂
+- `channel-router.ts` — 消息路由（IM → session）
+- `conversation-engine.ts` — 消费 SSE 流、保存消息
+- `permission-broker.ts` — 权限请求转为 IM 内联按钮
+- `delivery-layer.ts` — 消息分片、速率限制、HTML 降级
+- `bridge-manager.ts` — 生命周期编排
+- `markdown/` — Markdown → IR → 渠道特定格式（Telegram HTML / 飞书卡片）
+- `adapters/telegram-adapter.ts` — Telegram 长轮询
+- `adapters/feishu-adapter.ts` — 飞书薄代理（委托给 Channel Plugin）
+
+### Channel Plugin 层
+
+`src/lib/channels/` — 结构化渠道插件，提供 `ChannelPlugin<T>` 合约。
+
+- `types.ts` — `ChannelPlugin`/`ChannelCapabilities`/`ProbeResult`/`CardStreamController` 接口
+- `channel-plugin-adapter.ts` — Plugin → `BaseChannelAdapter` 桥接适配器
+- `feishu/` — 飞书渠道插件（模块化拆分）
+  - `types.ts` — 飞书内部类型常量
+  - `config.ts` — `FeishuConfig` 结构化配置 + 校验
+  - `gateway.ts` — WSClient 生命周期 + 连接状态机 + probe
+  - `inbound.ts` — 入站消息处理 + 资源下载
+  - `outbound.ts` — 出站消息渲染（card/post/permission）
+  - `identity.ts` — Bot 身份解析 + @mention 检测
+  - `policy.ts` — 访问控制 + 群策略
+  - `card-controller.ts` — CardStreamController 接口 + 占位
+  - `index.ts` — `FeishuChannelPlugin` 入口
+
+### Remote Core 层
+
+`src/lib/remote/` — 远程 Host/Controller/Session/Lease 合约（接口 + 骨架）。
+
+- `types.ts` — `RemoteHost`/`RemoteController`/`SessionLease`/`RemoteEvent` 接口
+- `remote-manager.ts` — 轻量运行时骨架
+- `index.ts` — 公开导出
+
+详细文档：`docs/handover/bridge-system.md`
+
+## 新增功能标准触及点
+
+添加新功能时通常需要修改以下位置：
+
+| 触及点 | 路径 | 说明 |
+|--------|------|------|
+| 类型定义 | `src/types/index.ts` | 新增接口/类型 |
+| 数据库 | `src/lib/db.ts` | 新增表或字段（含迁移逻辑） |
+| API 路由 | `src/app/api/{功能名}/route.ts` | 新增 REST 端点 |
+| 页面 | `src/app/{功能名}/page.tsx` | 新增路由页面 |
+| 组件 | `src/components/{功能名}/` | UI 组件 |
+| Hook | `src/hooks/use{功能名}.ts` | 状态管理 Hook |
+| 国际化 | `src/i18n/en.ts` + `zh.ts` | 双语翻译键 |
+| Bridge | `src/lib/bridge/adapters/` + `types.ts` | 如涉及 IM 集成 |
+
+## 关键文档索引
+
+| 文档 | 路径 | 内容 |
+|------|------|------|
+| Bridge 系统 | `docs/handover/bridge-system.md` | 架构、适配器、渲染管线 |
+| Agent 工具集成 | `docs/handover/agent-tooling-todo-bridge.md` | SDK 工具调用、任务桥接 |
+| SDK 集成调研 | `docs/research/chat-sdk-integration-feasibility.md` | Chat SDK 可行性分析 |
+| 上下文存储迁移（调研） | `docs/research/context-storage-migration-plan.md` | 数据库迁移详细方案 |
+| 上下文存储迁移（执行） | `docs/exec-plans/active/context-storage-migration.md` | 分阶段进度 + 决策日志 |
+| 技术债务 | `docs/exec-plans/tech-debt-tracker.md` | 已知技术债务清单 |
+| Provider/Error/Doctor | `docs/handover/provider-error-doctor.md` | 错误分类、Provider 生效、Auth 自动、诊断中心 |
+| 内置 Claude Code | `docs/handover/builtin-claude-code.md` | v0.55+ SDK 平台子包架构、binary 自动发现、asarUnpack、CI 跨架构装包、应急 fallback |
+| 内置 Claude Code（产品） | `docs/insights/builtin-claude-code.md` | 为什么从外置 → 内置、3 个方案对比、SDK 架构演进、+200MB 体积换零配置 |
+| 凭证本地加密 | `docs/handover/credential-encryption.md` | safeStorage 主密钥 + AES-256-GCM 列加密、双进程 env 过河、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe |
+| 凭证本地加密（产品） | `docs/insights/credential-encryption.md` | 保护下发凭证是 SaaS 必补一环、safeStorage vs SQLCipher/keytar、只加密磁盘的诚实边界 |
+| 额度用量进度条 | `docs/handover/usage-meter.md` | 用户栏三条已用%进度条、主进程代理 /api/v1/usage、点开才刷新、usedPercent/levelOf 纯函数、错误态 |
+| 额度用量进度条（产品） | `docs/insights/usage-meter.md` | 位置选择、主进程代理零 token 暴露、点开才刷新不轮询、三条已用%仅百分比、轻量边界 |
+| 主进程文件日志 | `docs/handover/file-logging.md` | 汇聚主进程 console.* 捕获主进程+捆绑服务、main.log 5MB×5 滚动、appendFileSync 崩溃安全、两层密钥脱敏、按完整行防 chunk 绕过、uncaughtExceptionMonitor、logs:open-folder + 设置按钮 |
+| 主进程文件日志（产品） | `docs/insights/file-logging.md` | 「崩了没日志」硬伤起因、汇聚主进程零侵入、同步写换崩溃安全、只脱密钥保路径取舍、对抗评审三个坑、源头脱敏未来方向 |
+| 测试模块使用统计 | `docs/handover/test-usage-stats.md` | 事件流水表 + 纯函数聚合口径层、10 类事件字典、四 scope API + 4 Sheet 导出、TestStatsView 看板、服务端逐用例计时、模型节点级归因、fail-safe 埋点、electron-as-node 验证法 |
+| 测试模块使用统计（产品） | `docs/insights/test-usage-stats.md` | 量 AI 用例/判断/效率三把尺、采纳率首轮基线、准确度必配覆盖率、事件流水而非聚合表（口径可重算+二期上报）、只给指标不列用例、对抗评审驱动质量、已知局限 |
+| 回归测试使用统计 | `docs/handover/regression-stats.md` | Stats 面板二级 toggle（功能/回归）、文件态聚合不复用事件表（单项目口径）、套件执行/用例执行/脚本重放 vs AI 三图 + 套件明细、纯核 aggregateRegressionStats + fs wrapper、run.json 近 50 轮护栏、circuitBroken/running 排除口径、CDP mock 验证 |
+| 冒烟测试 | `docs/handover/smoke-test.md` | 测试工作台第三形态：任务子类型 + 三段页签 + 无门控创建即跑、轻场景落 cases.json（tags 恒空/verification 恒功能验证）、prompt 三变体 + @@OBSERVATION、Bug 复核三层模型（事实层派生 + md 初判 + bugs.json 覆盖层 runHash 绑定）、复核复用 report_reviewed |
+| 办公 PPT Structured Artifact | `docs/handover/ppt-structured-artifact.md`（以及 M1–M5 历史交接） | Cowork 跨设备事实源；IR v3 稳定对象 ID；持久 Run/DAG/Event + SSE；共享 Render Tree；Command Journal、Undo/Redo、冲突与版本恢复；对象画布和 AI 编辑；草稿/发布分离；外部 PPTX 保守保真编辑 |
+| 冒烟测试（产品） | `docs/insights/smoke-test.md` | 提示词产品化的判断标准（每次相同的沉淀进平台）、第三形态而非轻量模式的理由、无门控/缺预期不臆造/复核不发明新机制/双记录结论四个反直觉决策、三轮用户反馈记录 |
+| 回归测试使用统计（产品） | `docs/insights/regression-stats.md` | 三种子（套件新增/执行/用例执行）升级为趋势与结构、不复用事件表的理由、二级切换而非合并、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI |
+
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 桌面外壳 | Electron 40 |
+| 前端框架 | Next.js 16 (App Router) + React 19 |
+| 样式 | Tailwind CSS 4 + Radix UI |
+| 数据库 | better-sqlite3 (WAL) |
+| AI 集成 | Claude Agent SDK, @ai-sdk/anthropic, @ai-sdk/google, @ai-sdk/openai |
+| IM 集成 | Telegram Bot API, 飞书 SDK (@larksuiteoapi/node-sdk) |
+| 代码高亮 | Shiki |
+| Markdown | react-markdown, streamdown, markdown-it |
+| 打包 | electron-builder (DMG + NSIS) |
+| 测试 | Playwright (E2E), tsx + node:test (单元) |
+
+### PPT 模板确认与编辑增量架构（2026-09-30）
+
+四入口共用模板预览与设置布局；生成时修改通过持久 Intent、固定 stable slideId 范围和页级 epoch 接入既有 Run/DAG；生成后 AI 先产服务端 Proposal，再经现有 Command/Journal 写草稿，显式 publish 才更新导出版本。详细数据契约、接口、恢复策略和验证边界见 [PPT 编辑架构交接](docs/handover/ppt-edit-intent-proposal-architecture.md)。
+
+### PPT 类型化修改与恢复运行时（2026-09-30）
+
+PlanRevision / ConstraintSet / ArtifactRevision 分离；文本任务固定使用用户所选模型，额度不足等待 FIFO 槽位。逐页 source→content→layout→preview→quality 使用 canonical IR 和共享 RenderTree，内容先持久化，渲染失败不重生成文字。生成暂停到安全边界落 checkpoint；恢复复用有效内容与页级 epoch，暂停时手动修改同步生成缓存，避免旧任务覆盖。
+
+title/content/layout/style/asset/data/structure 走类型化 mutation→validated Proposal→Command Journal→草稿→显式 publish。结构提案同步页数预算、证据 contract、叙事与页码；生成中结构修改在整稿完成后提供可确认预览。AssetTask 单独 attempt 与 retry，内容保护按实际 render hash 接受。语义变化使输入绑定的 review 失效，critic 读取 canonical 图表/表格数据。当前依然是单服务有界 coordinator，不是分布式通用 DAG 或自动多模型平台。详细契约、前端协议、测试与限制见 [统一运行时交接](docs/handover/ppt-mutation-runtime-unification.md)。
+
+### PPT 模板预处理、来源结构与观测（2026-10-03）
+
+上传/managed登记时安全校验并生成版本化Template IR；runtime按账号/hash/parser复用，复制原始文件到当前workspace用于保真导出。项目snapshot v2将媒体外置为账号内SHA引用，保留raw/v1读取。Source Inventory→Coverage v2→页级typed refs→确定性可编辑表格/流程/清单进入既有Render Tree与原生导出器；Run/DAG记录13里程碑和节点耗时。产品步骤、稳定ID、局部编辑和显式发布协议保持。部署配置、GC/回滚与未验证边界见[本轮PPT变更](docs/research/ppt_changes.md)。

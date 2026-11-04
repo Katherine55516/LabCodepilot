@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {normalizePaste} from './lib/ppt-source.mjs';
+import {richTextContent} from './lib/ppt-rich-text.mjs';
+import {reviewWithContractRepair,sourceOmissionWitnesses} from './lib/ppt-quality.mjs';
+import {scopeReview} from './ppt-scope-test-helpers.mjs';
+const source=normalizePaste('# Access review\n\nOnly approved accounts may read a document. Missing permission blocks that document, not other approved documents.');
+const item=source.semantic.inventory.items.find(i=>i.type!=='HeadingBlock');
+const p={source,userRequirements:'Preserve all supplied access conditions.',generationPolicy:{content:'full_source',knowledge:'source_only',language:{mode:'source',body:'both'}},outline:[{id:'page',sourceUnitIds:[item.id]}],deck:{slides:[{id:'page',title:'Access review',nodes:[{id:'actual',type:'text',semanticRole:'source-structure',sourceArtifact:{sourceUnitId:item.id,type:item.type},content:richTextContent(item.text)}]}]}};
+const missing=project=>{const r=scopeReview(project,{missing:[{slideIds:['page'],detail:'The complete source unit '+item.id+' is missing.'}]});for(const c of r.obligationAudit.checks){c.status='missing';c.evidence=[];}return r;};
+const original=JSON.stringify(p);let calls=[];
+const reviewed=await reviewWithContractRepair(p,async(prompt,key)=>{calls.push({prompt,key});return calls.length===1?missing(p):scopeReview(p);});
+assert.equal(calls.length,2);assert.match(calls[1].key,/source-witness/);assert.match(calls[1].prompt,/<source_omission_witness_recheck>/);assert.ok(calls[1].prompt.includes(item.text));assert.equal(reviewed.missing.length,0);assert.equal(reviewed.sourceWitnessRecheck.previousReview.missing.length,1);assert.equal(JSON.stringify(p),original,'the review never edits source, content, locks or ownership');
+const altered=structuredClone(p);altered.deck.slides[0].nodes[0].content=richTextContent('All accounts may read every document.');let alteredCalls=0;
+const rejected=await reviewWithContractRepair(altered,async()=>{alteredCalls++;return missing(altered);});assert.equal(alteredCalls,1);assert.equal(rejected.missing.length,1,'changed source text cannot produce an exact witness or erase a finding');
+const hidden=structuredClone(p);hidden.deck.slides[0].nodes[0].hidden=true;assert.deepEqual(sourceOmissionWitnesses(hidden,missing(hidden)),[]);
+let persistentCalls=0;const persistent=await reviewWithContractRepair(p,async()=>{persistentCalls++;return missing(p);});assert.equal(persistentCalls,2);assert.equal(persistent.missing.length,1,'a second negative semantic verdict remains negative; no automatic pass');
+let boundedCalls=0;await reviewWithContractRepair(p,async()=>{boundedCalls++;return missing(p);},{maxRepairs:0});assert.equal(boundedCalls,1);
+let factCalls=0;const fact=await reviewWithContractRepair(p,async()=>{factCalls++;return scopeReview(p,{conflicts:[{slideIds:['page'],detail:'The body changes the access condition.'}]});});assert.equal(factCalls,1);assert.equal(fact.conflicts.length,1,'real conflicts are not reclassified or filtered');
+console.log('Bounded same-role omission re-read: exact owned visible prose only, unchanged source, preserved first review, persistent omissions and real conflicts retained.');
+
+const mathSource=normalizePaste('# Candidates\n\nSearch $10^6$ candidates.'),mathItem=mathSource.semantic.inventory.items.find(i=>i.type!=='HeadingBlock');
+const mathProject={...p,source:mathSource,outline:[{id:'page',sourceUnitIds:[mathItem.id]}],deck:{slides:[{id:'page',nodes:[{id:'flat',type:'text',sourceArtifact:{sourceUnitId:mathItem.id},content:{text:'Search 106 candidates.'}}]}]}};
+assert.deepEqual(sourceOmissionWitnesses(mathProject,{missing:[{detail:mathItem.id}],obligationAudit:{checks:[]}}),[],'flattened equal digits cannot certify missing native math structure');
+const summarized=structuredClone(p);summarized.source.semantic.inventory.items.find(i=>i.id===item.id).derivedSummary={summaryMode:'semantic'};assert.deepEqual(sourceOmissionWitnesses(summarized,missing(summarized)),[],'a selected summary cannot certify complete original prose');

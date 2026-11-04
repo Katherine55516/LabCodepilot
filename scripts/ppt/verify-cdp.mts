@@ -1,0 +1,26 @@
+/** Real dev UI over CDP; API fixtures isolate UI behavior from credentials. */
+import fs from 'node:fs';
+import path from 'node:path';
+import {chromium,expect} from '@playwright/test';
+import parityModule from '../../src/__tests__/fixtures/ppt-parity.ts';
+const {pptParityFixture}=parityModule;
+import {slideSvg} from '../../apps/cowork-server/lib/ppt/exporters/preview.mjs';
+const output=path.resolve('outputs/ppt-next-round/ui');fs.mkdirSync(output,{recursive:true});
+const host=await chromium.launch({headless:true,args:['--remote-debugging-port=9335']});
+const browser=await chromium.connectOverCDP('http://127.0.0.1:9335');
+const context=await browser.newContext({viewport:{width:1440,height:980}}),page=await context.newPage();
+const cdp=await context.newCDPSession(page),errors:string[]=[];await cdp.send('Runtime.enable');await cdp.send('Log.enable');
+cdp.on('Runtime.exceptionThrown',event=>errors.push(event.exceptionDetails.text));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+const fixture=pptParityFixture({completeAfterEdits:2});
+await page.route('**/api/**',async route=>{const r=await fixture.handle(route.request().method(),new URL(route.request().url()).pathname,route.request().postData()?route.request().postDataJSON():{});if(!r)return route.continue();await route.fulfill({status:r.status,contentType:r.contentType||'application/json',body:typeof r.body==='string'?r.body:JSON.stringify(r.body)});});
+async function shot(name:string){const r=await cdp.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(output,name+'.png'),Buffer.from(r.data,'base64'))}
+try{
+ await page.goto('http://localhost:3000/ppt');await page.getByRole('button',{name:'＋ 新建',exact:true}).click();await page.getByRole('button',{name:/粘贴文本/}).click();await page.getByRole('combobox',{name:'LLM（必填）'}).selectOption('managed-demo::demo-model');await page.getByRole('button',{name:'确认并继续 →'}).click();await page.getByRole('button',{name:/Teaching template/}).click();await shot('template-desktop');await page.getByRole('button',{name:'下一步：输入内容 →'}).click();await page.getByRole('textbox',{name:'粘贴文本',exact:true}).fill('# Training\nConditions and mechanism. '.repeat(20));await page.getByRole('button',{name:'生成 Syllabus',exact:true}).click();await expect(page.getByRole('textbox',{name:'大纲标题 8',exact:true})).toBeVisible();await shot('input-desktop');
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:500,deviceScaleFactor:1,mobile:true});const body=page.locator('.ppt-create-body');await body.hover();await page.mouse.wheel(0,1800);await expect(page.getByRole('button',{name:'确认 Syllabus 并开始生成'})).toBeVisible();await shot('input-mobile');await page.getByRole('button',{name:'确认 Syllabus 并开始生成'}).click();
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:980,deviceScaleFactor:1,mobile:false});await page.goto('http://localhost:3000/ppt');await page.getByRole('button').filter({has:page.getByRole('heading',{name:'Workflow fixture',exact:true})}).filter({hasText:'生成中'}).first().click();await page.getByRole('button',{name:/修改生成要求|Edit during generation/}).click();const panel=page.getByTestId('ppt-generation-edit');await panel.getByRole('textbox').fill('Clarify the definition');await panel.getByRole('button',{name:/提交修改|Submit/}).click();await expect(panel.getByTestId('ppt-generation-messages')).toContainText('Clarify the definition');await shot('generation-chat');
+ // Inspect the actual SVG exporter in Chromium: EMU canvas, CSS text scaling,
+ // readable cell geometry and wrapped cell height, rather than a string assertion.
+ const svg=slideSvg({id:'table',size:{width:12192000,height:6858000},background:'#fff',elements:[{kind:'table',nodeId:'t',bounds:{x:800000,y:1700000,width:10500000,height:4400000},style:{fontSizePt:18,fontFamily:'Arial',fill:'#e7e5f4'},content:{rows:[['Dimension','Meaning','Condition'],['Queue','Pending work must have an owner and evidence before execution.','Before execution'],['Result','A validated outcome retains the mechanism and limitation.','After review']],columnWeights:[1,3,1.5],rowWeights:[1,2,2]}}]});
+ await page.setContent(`<style>body{margin:0}svg{width:1400px;height:788px}</style>${svg}`);const cells=page.locator('foreignObject div');await expect(cells).toHaveCount(9);const bounds=await cells.nth(4).boundingBox();if(!bounds||bounds.width<400||bounds.height<100)throw Error('EMU table text is not scaled to the visible canvas');const fits=await cells.evaluateAll(nodes=>nodes.every(node=>node.scrollHeight<=node.clientHeight));if(!fits)throw Error('Table preview cells overflow');await shot('native-table-preview');if(errors.length)throw Error(errors.join('\n'));
+ fs.writeFileSync(path.join(output,'cdp.json'),JSON.stringify({transport:'Playwright connectOverCDP (chrome-devtools MCP unavailable)',application:'real Next dev at localhost:3000',api:'UI fixture; not remote sandbox',consoleErrors:errors,checks:['mode/model/template/input order','template preview','syllabus confirmation and mobile vertical scroll','generation edit submit','EMU table preview dimensions and all cells fit']},null,2));console.log('CDP UI and SVG table: passed, zero console errors');
+}finally{await browser.close();await host.close();}

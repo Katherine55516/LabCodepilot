@@ -1,0 +1,24 @@
+[Unit]
+# Cowork 出网禁内网防火墙(R4)—— 开机把 DOCKER-USER 规则装到固定网桥 cowork0:
+# 内部 RETURN(会话容器↔cred-proxy)+ 私网四段 REJECT(防不可信 agent 内网横移),
+# 公网放行。幂等(脚本先删本标记规则再装),重跑安全。
+#
+# 时序:仅需 After=docker.service —— DOCKER-USER 链随 docker 启动就存在;iptables 按
+# 接口名匹配,cowork0 网桥即便此刻尚未由 cowork-server 建出,规则先装好、网桥出现后
+# 自动生效。故本单元不依赖 cowork-server.service。
+Description=Cowork sandbox egress firewall (block private nets on cowork0)
+Documentation=file:///opt/cowork-server/deploy/README.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env sh __DEST__/setup-egress.sh
+RemainAfterExit=yes
+# 幂等,失败可诊断(缺 DOCKER-USER=docker 未带 iptables 起)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cowork-egress
+
+[Install]
+WantedBy=multi-user.target

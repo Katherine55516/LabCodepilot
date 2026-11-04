@@ -1,0 +1,486 @@
+name: Build & Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Target platform"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - ppt
+  pull_request:
+    branches: [main]
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  lint-test:
+    if: ${{ inputs.platform != 'ppt' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+  smoke-test:
+    needs: [lint-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: npm run test:smoke
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  ppt-arm64:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.platform == 'ppt' }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PORT: '3110'
+      # Test-only AES key; no user's credential or live model key in CI.
+      CLAUDE_GUI_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      PPT_CI_OUTPUT: ${{ github.workspace }}/outputs/ppt-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert native Apple Silicon and record runtime
+        run: |
+          test "$(uname -m)" = arm64
+          echo "CLAUDE_GUI_DATA_DIR=$RUNNER_TEMP/ppt-ci-profile" >> "$GITHUB_ENV"
+          mkdir -p outputs/ppt-ci
+          node -e 'console.log(JSON.stringify({sha:process.env.GITHUB_SHA,arch:process.arch,platform:process.platform,cpu:require("os").cpus()[0].model,node:process.version},null,2))' > outputs/ppt-ci/runner.json
+          echo "PPT_TEST_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+      - name: Install production and test dependencies
+        run: |
+          npm ci
+          brew install cairo fontconfig
+          brew install --cask libreoffice font-noto-sans-cjk-sc font-stix
+          fc-cache -f
+          soffice --version
+          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf matplotlib pdfplumber reportlab
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          npx playwright install chromium
+      - name: Unit and type checks
+        run: npm run test > outputs/ppt-ci/unit.log 2>&1
+      - name: PPT API, contracts, density and real native exports
+        run: node apps/cowork-server/scripts/ppt-ci.mjs --require-arm64
+      - name: PPT workflows in the actual UI
+        run: npx playwright test 'ppt-.*\.spec\.ts' --workers=2 --timeout=90000 --reporter=line > outputs/ppt-ci/browser.log 2>&1
+      - name: Build and verify source-only server deployment artifact
+        run: |
+          node scripts/ppt/selftest-release-upgrade.mjs > outputs/ppt-ci/upgrade.log 2>&1
+          node scripts/ppt/package-cowork-release.mjs outputs/ppt-ci/cowork-release.tar.gz
+          mkdir -p "$RUNNER_TEMP/ppt-release-check"
+          tar -xzf outputs/ppt-ci/cowork-release.tar.gz -C "$RUNNER_TEMP/ppt-release-check"
+          node apps/cowork-server/deploy/verify-release.mjs "$RUNNER_TEMP/ppt-release-check/cowork-release"
+      - name: Upload evidence and deployment source
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppt-arm64-validation
+          path: |
+            outputs/ppt-ci/
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+  build-windows:
+    needs: [lint-test, smoke-test]
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
+    # Pin to windows-2022 — windows-latest is now windows-2025, which ships
+    # Visual Studio 18 (preview). node-gyp 11 can't parse VS 18's version string
+    # ("unknown version 'undefined'"), so any package that runs node-gyp during
+    # install (zlib-sync here) fails with "Could not find any Visual Studio
+    # installation". windows-2022 still has VS 17 which node-gyp recognises.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Defender 实时扫描会在 electron-builder 高速复制 standalone 上千文件时
+      # 逐个触发按需扫描,copyfile 撞上扫描中的文件即 EBUSY(实测两次分别锁不同
+      # 的 .nft.json)。把 workspace 加入排除清单从根上消除竞态,顺带加速构建。
+      - name: Exclude workspace from Defender (EBUSY copyfile race)
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # next build 的文件追踪器(@vercel/nft)会按【构建进程的环境】求值
+      # USERPROFILE/APPDATA 等,再把「已知前缀+运行时变量」的路径通配成
+      # `<前缀>/**/*` 并真实 glob —— 在 runner 上全盘扫 C:\Users\runneradmin,
+      # 撞 "Application Data" junction 即 EPERM 构建失败。自家代码已用
+      # src/lib/user-home.ts 屏障修复;此处把三个变量指向临时空目录,
+      # 兜住改不了的第三方依赖(google-auth-library 等)的同类形态。
+      - name: Prepare isolated home (NFT glob containment)
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\nft-home\AppData\Roaming","$env:RUNNER_TEMP\nft-home\AppData\Local" | Out-Null
+
+      - name: Build Electron app
+        run: npm run electron:build
+        env:
+          USERPROFILE: ${{ runner.temp }}\nft-home
+          APPDATA: ${{ runner.temp }}\nft-home\AppData\Roaming
+          LOCALAPPDATA: ${{ runner.temp }}\nft-home\AppData\Local
+          # NFT 追踪期仍有若干「未知前缀+字面量后缀」表达式被展开成项目根 glob,
+          # 每个都要遍历整个 workspace(含 node_modules),默认 2GB 堆撑不住(OOM 实测)
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      # 装【当前打包平台(win64)】的 chromium-headless-shell 到 ms-playwright-bundle/，供
+      # electron-builder.yml 的 extraResources 复制进 exe 的 resources/ms-playwright。缺这步
+      # → ms-playwright-bundle 不存在 → extraResources 静默跳过(glob 0 匹配) → exe 里没有
+      # 浏览器 → 测试执行的 Playwright MCP 起不来(用户「用不了 playwright」根因)。electron:pack:*
+      # script 里本有此步，但 CI 直接调 electron-builder 绕过了 script，故必须在此显式补上。
+      - name: Bundle Chromium headless shell
+        run: node scripts/bundle-chromium.mjs
+
+      # 重试兜底:EBUSY 类文件锁竞态即使经 no-op 签名消除主因,仍防御性重试。
+      # 每次重试前必须清空 release/ 并稍候:失败尝试可能残留子进程握着输出目录
+      # 句柄,原地重跑会 16 秒内秒死(4.0.0 首打时三连 EBUSY 实测,后两次即此故障)。
+      - name: Package for Windows (x64 only)
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($i in 1..3) {
+            if ($i -gt 1) {
+              Write-Host "清理上一轮残留输出后重试..."
+              Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+              Start-Sleep -Seconds 15
+            }
+            npx electron-builder --win --x64 --config electron-builder.yml --publish never
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "electron-builder 第 $i 次失败(exit $LASTEXITCODE)"
+          }
+          if (-not $ok) { exit 1 }
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          cd release
+          Get-ChildItem *.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Append checksums-windows.sha256 -Encoding utf8
+          }
+          Get-Content checksums-windows.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-windows
+          path: |
+            release/*.exe
+            release/checksums-windows.sha256
+          retention-days: 3
+
+  build-macos:
+    needs: [lint-test, smoke-test]
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
+    runs-on: macos-latest
+    env:
+      HAS_CERT: ${{ secrets.MAC_CERT_P12_BASE64 != '' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # electron:build 链里的 scripts/bundle-vfkit.mjs 需要本机有带
+      # com.apple.security.virtualization entitlement 的 vfkit(Cowork 沙箱靠它起
+      # Virtualization.framework),缺了直接 exit 1 —— 该脚本刻意 fail-hard,因为
+      # 没有 entitlement 的包沙箱起不来,宁可构建失败也不静默出坏包。runner 不预装
+      # vfkit,故显式安装;homebrew-core 有 bottle(31.9MB),自带该 entitlement。
+      # 注:此步缺失导致 build-macos 自 24a849f(2026-07-14)起从未成功跑通,
+      # 期间所有 dispatch 都只选了 windows/skip 掉 macOS,故一直未暴露。
+      - name: Install vfkit (required by bundle-vfkit.mjs)
+        run: brew install vfkit
+
+      - name: Build Electron app
+        run: npm run electron:build
+
+      # 装 mac-arm64 的 chromium-headless-shell 到 ms-playwright-bundle/（同 Windows job 的
+      # 说明）——CI 直接调 electron-builder 绕过了 electron:pack:mac script，故显式补此步，
+      # 否则 dmg 缺浏览器、测试执行的 Playwright 起不来。
+      - name: Bundle Chromium headless shell
+        run: node scripts/bundle-chromium.mjs
+
+      # The Claude Code native binary ships in the platform optional subpackage
+      # @anthropic-ai/claude-agent-sdk-darwin-arm64 and must end up at
+      # .next/standalone/node_modules/... (electron-builder packs that tree via
+      # extraResources, afterPack verifies it). npm ci sometimes skips the
+      # os/cpu-gated optional dep on the mac runner, and Next standalone tracing
+      # cannot follow the SDK dynamic require.resolve, so the binary goes missing.
+      # Fix: ensure subpackage exists in root node_modules, then copy it into
+      # the standalone tree where extraResources picks it up.
+      - name: Inject Claude Code native binary into standalone
+        run: |
+          SDK_VER=$(node -e "console.log(JSON.parse(require('fs').readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json','utf8')).version)")
+          echo "claude-agent-sdk version: $SDK_VER"
+          SUB="claude-agent-sdk-darwin-arm64"
+          if [ ! -f "node_modules/@anthropic-ai/${SUB}/claude" ]; then
+            npm install --no-save --force --os=darwin --cpu=arm64 "@anthropic-ai/${SUB}@${SDK_VER}"
+          fi
+          DEST=".next/standalone/node_modules/@anthropic-ai"
+          mkdir -p "$DEST"
+          rm -rf "${DEST}/${SUB}"
+          cp -R "node_modules/@anthropic-ai/${SUB}" "${DEST}/${SUB}"
+          if [ -f "${DEST}/${SUB}/claude" ]; then
+            ls -la "${DEST}/${SUB}/claude"
+            echo "OK: claude binary present in standalone"
+          else
+            echo "::error::claude binary missing in standalone after copy"
+            ls -la "${DEST}/${SUB}" || true
+            exit 1
+          fi
+
+      # ── Signing is OPTIONAL ─────────────────────────────────────────────
+      # If `MAC_CERT_P12_BASE64` + `MAC_CERT_PASSWORD` secrets are present:
+      #   → decode the .p12, pass it to electron-builder via CSC_LINK,
+      #     and verify the resulting .app is signed with Developer ID.
+      # Otherwise:
+      #   → build an UNSIGNED DMG (still works on macOS, but users will see
+      #     a Gatekeeper warning on first launch and need to right-click →
+      #     "Open" or approve under System Settings → Privacy & Security).
+      # This lets the workflow succeed without Apple Developer Program
+      # credentials, useful for development / verification builds.
+
+      - name: Decode signing certificate (if configured)
+        if: env.HAS_CERT == 'true'
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          printf '%s' "$MAC_CERT_P12_BASE64" | tr -d '\r\n' | base64 --decode > /tmp/cert.p12
+          openssl pkcs12 -in /tmp/cert.p12 -passin pass:"$MAC_CERT_PASSWORD" -noout
+          echo "Certificate decoded and validated"
+
+      - name: Package for macOS (arm64, signed)
+        if: env.HAS_CERT == 'true'
+        timeout-minutes: 15
+        env:
+          CSC_LINK: /tmp/cert.p12
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: npx electron-builder --mac --arm64 --config electron-builder.yml --publish never
+
+      - name: Package for macOS (arm64, unsigned)
+        if: env.HAS_CERT != 'true'
+        timeout-minutes: 15
+        env:
+          # Disable automatic identity discovery so electron-builder doesn't
+          # try to sign with any keychain identity that might exist on the
+          # runner. We want a fully unsigned build.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          echo "::warning::Building UNSIGNED macOS bundle (MAC_CERT_P12_BASE64 secret not set). Users will need to approve the app under System Settings → Privacy & Security on first launch."
+          npx electron-builder --mac --arm64 --config electron-builder.yml --publish never
+
+      - name: Verify code signature (if signed)
+        if: env.HAS_CERT == 'true'
+        run: |
+          APPS=$(find release -name "CodePilot.app" -maxdepth 3)
+          if [ -z "$APPS" ]; then
+            echo "::error::No CodePilot.app found after build"
+            exit 1
+          fi
+
+          FAILED=0
+          while IFS= read -r APP_PATH; do
+            echo "========== Verifying: $APP_PATH =========="
+            codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/codesign-info.txt || true
+
+            if ! grep -q 'Authority=Developer ID Application' /tmp/codesign-info.txt; then
+              echo "::error::$APP_PATH is NOT signed with Developer ID Application"
+              FAILED=1
+              continue
+            fi
+
+            if ! grep -q 'TeamIdentifier=K9X599X9Q2' /tmp/codesign-info.txt; then
+              echo "::error::$APP_PATH has unexpected TeamIdentifier"
+              FAILED=1
+              continue
+            fi
+
+            codesign --verify --deep --strict --verbose=4 "$APP_PATH"
+            echo "✓ $APP_PATH passed all checks"
+          done <<< "$APPS"
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::One or more .app bundles failed signature verification"
+            exit 1
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd release
+          shasum -a 256 *.dmg *.zip 2>/dev/null | tee checksums-macos.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-macos
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/checksums-macos.sha256
+          retention-days: 3
+
+  release:
+    if: ${{ always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(needs.*.result, 'cancelled') }}
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Get version and previous tag
+        id: meta
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          PREV_TAG=$(git tag --sort=-creatordate | grep '^v' | sed -n '2p' || echo "")
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG="${{ steps.meta.outputs.prev_tag }}"
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            git log "$RANGE" --pretty=format:'| `%h` | %s |'
+            echo ""
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+
+          # Use RELEASE_NOTES.md from repo if present; otherwise generate a minimal fallback
+          if [ -f "RELEASE_NOTES.md" ]; then
+            echo "Using RELEASE_NOTES.md from repository"
+            cp RELEASE_NOTES.md release-notes.md
+          else
+            echo "RELEASE_NOTES.md not found, generating default notes"
+            cat > release-notes.md << NOTES_EOF
+          ## CodePilot v${VERSION}
+
+          ## 下载地址
+
+          ### macOS
+          - [Apple Silicon (M1/M2/M3/M4)](https://github.com/op7418/CodePilot/releases/download/v${VERSION}/CodePilot-${VERSION}-arm64.dmg)
+
+          ### Windows
+          - [Windows 安装包](https://github.com/op7418/CodePilot/releases/download/v${VERSION}/CodePilot.Setup.${VERSION}.exe)
+
+          ## 安装说明
+
+          **macOS**: 下载 DMG → 拖入 Applications → 首次启动如遇安全提示，在系统设置 > 隐私与安全中点击"仍要打开"
+          **Windows**: 下载 exe 安装包 → 双击安装
+
+          ## 系统要求
+
+          - macOS 12.0+（Apple Silicon）/ Windows 10+ (x64)
+          - 需要配置 API 服务商（Anthropic / OpenRouter 等）
+          - Claude Code 已内置，无需单独安装
+          NOTES_EOF
+          fi
+
+          # Merge per-platform checksums into a single file
+          echo "## SHA-256 Checksums" > artifacts/SHA256SUMS.txt
+          echo "" >> artifacts/SHA256SUMS.txt
+          for cs in artifacts/checksums-*.sha256; do
+            [ -f "$cs" ] || continue
+            cat "$cs" >> artifacts/SHA256SUMS.txt
+          done
+          echo "=== Combined checksums ==="
+          cat artifacts/SHA256SUMS.txt
+
+          # Collect release files: installers + checksum file (no blockmap / update metadata)
+          FILES=()
+          while IFS= read -r f; do
+            FILES+=("$f")
+          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" \) | sort)
+          FILES+=("artifacts/SHA256SUMS.txt")
+
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "CodePilot v${VERSION}" \
+            --notes-file release-notes.md \
+            --latest \
+            "${FILES[@]}"

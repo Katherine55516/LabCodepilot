@@ -1,0 +1,524 @@
+import { execFileSync, execFile } from 'child_process';
+import fs from 'fs';
+import { promisify } from 'util';
+import os from 'os';
+import path from 'path';
+
+const execFileAsync = promisify(execFile);
+
+export const isWindows = process.platform === 'win32';
+export const isMac = process.platform === 'darwin';
+
+// Windows 上探测命令用 where.exe 的【绝对路径 + shell:false】，而不是 {shell:true}。
+// shell:true 会派生 cmd.exe 去解析命令，而在 Electron utilityProcess 内嵌服务里 spawn cmd.exe
+// 会撞 crashpad(not connected) 触发 native 崩溃(code -36616) 并带崩整个服务 —— 这是 Windows 打包
+// 版「常驻 ConnectionStatus 轮询 /api/claude-status → findGitBash/findClaudeBinary」每十几秒崩一次
+// 的根因。where.exe 是可直接执行的 .exe，绝对路径 + shell:false 即可正常探测、且绝不派生 cmd.exe。
+// (直接去 shell 不行：Node 在 Windows 对无扩展名的 'where' 不解析 PATHEXT 会 ENOENT，故用绝对路径。)
+const WHERE_EXE = isWindows
+  ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\where.exe`
+  : 'where';
+
+export interface RuntimeArchitectureInfo {
+  platform: NodeJS.Platform;
+  processArch: string;
+  hostArch: string;
+  runningUnderRosetta: boolean;
+}
+
+/**
+ * Whether the given binary path requires shell execution.
+ * On Windows, .cmd/.bat files cannot be executed directly by execFileSync.
+ */
+function needsShell(binPath: string): boolean {
+  return isWindows && /\.(cmd|bat)$/i.test(binPath);
+}
+
+/**
+ * Windows 上该路径能否交给 execFileSync 直接拉起。
+ *
+ * 只有 .exe / .cmd / .bat 可以。**无扩展名的 `claude` 绝不可以** —— 那是安装器留给
+ * Git Bash 的 POSIX sh 脚本(npm 全局装会同时生成 claude.cmd + claude;在 Git Bash 里
+ * 跑官方 install.sh 则只装出无扩展名的那一个)，不是 PE 镜像。把它丢给 CreateProcessW
+ * 时 Windows 会弹出系统级模态框「此应用无法在你的电脑上运行」——由系统抛出，应用无法
+ * 捕获或抑制。用户线上实测:启动进主界面即弹(chat 页 → /api/setup → findClaudeBinary)，
+ * 关掉后功能正常(探测异常被 catch，最终用随包自带的 claude.exe)，但体验上是硬伤。
+ *
+ * 故所有会走到 execFileSync 的候选都必须先过这道闸。非 Windows 无扩展名即常态，放行。
+ */
+function isSpawnableBinary(p: string): boolean {
+  return !isWindows || /\.(exe|cmd|bat|com)$/i.test(p);
+}
+
+function readSysctlValue(name: string): string | null {
+  try {
+    return execFileSync('/usr/sbin/sysctl', ['-in', name], {
+      encoding: 'utf-8',
+      timeout: 1000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+export function getRuntimeArchitectureInfo(): RuntimeArchitectureInfo {
+  const processArch = process.arch;
+  let hostArch = processArch;
+  let runningUnderRosetta = false;
+
+  if (isMac) {
+    const armCapable = readSysctlValue('hw.optional.arm64');
+    if (armCapable === '1') {
+      hostArch = 'arm64';
+    }
+
+    runningUnderRosetta = readSysctlValue('sysctl.proc_translated') === '1';
+  }
+
+  return {
+    platform: process.platform,
+    processArch,
+    hostArch,
+    runningUnderRosetta,
+  };
+}
+
+/**
+ * Extra PATH directories to search for Claude CLI and other tools.
+ */
+export function getExtraPathDirs(): string[] {
+  const home = os.homedir();
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    return [
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.claude', 'bin'),
+      path.join(home, '.bun', 'bin'),
+      path.join(appData, 'npm'),
+      path.join(localAppData, 'npm'),
+      path.join(home, '.npm-global', 'bin'),
+      path.join(home, '.nvm', 'current', 'bin'),
+    ];
+  }
+  return [
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.claude', 'bin'),
+    path.join(home, '.bun', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    '/usr/bin',
+    '/bin',
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.nvm', 'current', 'bin'),
+  ];
+}
+
+/**
+ * Classify a Claude CLI binary path by installation method.
+ */
+export type ClaudeInstallType = 'native' | 'homebrew' | 'npm' | 'bun' | 'winget' | 'unknown';
+
+export function classifyClaudePath(binPath: string): ClaudeInstallType {
+  const home = os.homedir();
+  const normalized = binPath.replace(/\\/g, '/');
+  // Native installer: ~/.local/bin/claude or ~/.claude/bin/claude
+  if (normalized.includes('/.local/bin/')) return 'native';
+  if (normalized.includes('/.claude/bin/')) return 'native';
+  // Bun: ~/.bun/bin/claude
+  if (normalized.includes('/.bun/bin/') || normalized.includes('/.bun/install/')) return 'bun';
+  // Homebrew: /opt/homebrew/bin or /usr/local/Cellar or homebrew in path
+  if (normalized.includes('/homebrew/') || normalized.includes('/Cellar/')) return 'homebrew';
+  // npm: npm-global, .npm, AppData/npm
+  if (normalized.includes('/npm') || normalized.includes('npm-global')) return 'npm';
+  if (normalized === '/usr/local/bin/claude') {
+    // /usr/local/bin could be npm or homebrew — check symlink target
+    try {
+      const real = fs.realpathSync(binPath);
+      if (real.includes('node_modules')) return 'npm';
+      if (real.includes('homebrew') || real.includes('Cellar')) return 'homebrew';
+      if (real.includes('.bun')) return 'bun';
+    } catch { /* ignore */ }
+    return 'unknown';
+  }
+  if (isWindows) {
+    const appData = (process.env.APPDATA || '').replace(/\\/g, '/');
+    const localAppData = (process.env.LOCALAPPDATA || '').replace(/\\/g, '/');
+    if (appData && normalized.startsWith(appData + '/npm')) return 'npm';
+    if (localAppData && normalized.startsWith(localAppData + '/npm')) return 'npm';
+    if (normalized.includes(home.replace(/\\/g, '/') + '/.local/bin')) return 'native';
+  }
+  return 'unknown';
+}
+
+/**
+ * Claude CLI candidate installation paths.
+ * Priority: native install > homebrew > npm (deprecated).
+ */
+export function getClaudeCandidatePaths(): string[] {
+  const home = os.homedir();
+  if (isWindows) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    // 不含无扩展名的 '' —— 见 isSpawnableBinary()。候选最终都会被 execFileSync
+    // 执行，无扩展名的 claude 是 sh 脚本，spawn 它必弹 Windows 系统错误框。
+    const exts = ['.cmd', '.exe', '.bat'];
+    // Native first, then bun, then npm paths
+    const baseDirs = [
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.claude', 'bin'),
+      path.join(home, '.bun', 'bin'),
+      path.join(appData, 'npm'),
+      path.join(localAppData, 'npm'),
+      path.join(home, '.npm-global', 'bin'),
+    ];
+    const candidates: string[] = [];
+    for (const dir of baseDirs) {
+      for (const ext of exts) {
+        candidates.push(path.join(dir, 'claude' + ext));
+      }
+    }
+    return candidates;
+  }
+  // macOS/Linux: native first, then bun, then homebrew, then npm paths
+  return [
+    path.join(home, '.local', 'bin', 'claude'),      // native installer
+    path.join(home, '.claude', 'bin', 'claude'),      // native alt
+    path.join(home, '.bun', 'bin', 'claude'),         // bun global
+    '/opt/homebrew/bin/claude',                        // homebrew (Apple Silicon)
+    '/usr/local/bin/claude',                           // homebrew (Intel) or npm global
+    path.join(home, '.npm-global', 'bin', 'claude'),  // npm custom prefix
+  ];
+}
+
+export interface ClaudeInstallInfo {
+  path: string;
+  version: string | null;
+  type: ClaudeInstallType;
+}
+
+/**
+ * Detect ALL Claude CLI installations on the system.
+ * Used to warn about conflicts when multiple versions coexist.
+ */
+export function findAllClaudeBinaries(): ClaudeInstallInfo[] {
+  const results: ClaudeInstallInfo[] = [];
+  const seenReal = new Set<string>();
+
+  function tryAdd(p: string) {
+    try {
+      let realPath: string;
+      try { realPath = fs.realpathSync(p); } catch { realPath = p; }
+      if (seenReal.has(realPath)) return;
+
+      // On Windows, installers create multiple variants in the same directory:
+      // native: claude.exe + claude (shell script), npm: claude.cmd + claude, etc.
+      // Deduplicate by dir + base name stripped of all executable extensions.
+      // Only record the dirKey AFTER --version succeeds, so a broken .cmd
+      // wrapper doesn't hide a working .exe in the same directory.
+      let winDirKey: string | undefined;
+      if (isWindows) {
+        winDirKey = path.join(path.dirname(realPath), path.basename(realPath).replace(/\.(exe|cmd|bat)$/i, '')).toLowerCase();
+        if (seenReal.has(winDirKey)) return;
+      }
+
+      const out = execFileSync(p, ['--version'], {
+        timeout: 3000,
+        stdio: 'pipe',
+        shell: needsShell(p),
+        encoding: 'utf-8',
+      });
+      seenReal.add(realPath);
+      if (winDirKey) seenReal.add(winDirKey);
+      results.push({ path: p, version: out.trim() || null, type: classifyClaudePath(p) });
+    } catch {
+      // not found at this path
+    }
+  }
+
+  // Check all known candidate paths
+  for (const p of getClaudeCandidatePaths()) {
+    tryAdd(p);
+  }
+
+  // Also scan PATH via which/where to catch bun, custom, or other non-standard installs
+  try {
+    const cmd = isWindows ? WHERE_EXE : '/usr/bin/which';
+    const args = isWindows ? ['claude'] : ['-a', 'claude']; // -a = show ALL matches
+    const result = execFileSync(cmd, args, {
+      timeout: 3000,
+      stdio: 'pipe',
+      env: { ...process.env, PATH: getExpandedPath() },
+      shell: false,
+      encoding: 'utf-8',
+    });
+    // where.exe 会把同目录下无扩展名的 claude(sh 脚本)一并列出，必须滤掉 ——
+    // tryAdd 会 execFileSync 它，spawn 非 PE 文件会弹 Windows 系统错误框。
+    for (const line of result.trim().split(/\r?\n/)) {
+      const candidate = line.trim();
+      if (candidate && isSpawnableBinary(candidate)) tryAdd(candidate);
+    }
+  } catch {
+    // which/where failed
+  }
+
+  return results;
+}
+
+/**
+ * Build an expanded PATH string with extra directories, deduped and filtered.
+ */
+export function getExpandedPath(): string {
+  const current = process.env.PATH || '';
+  const parts = current.split(path.delimiter).filter(Boolean);
+  const seen = new Set(parts);
+  for (const p of getExtraPathDirs()) {
+    if (p && !seen.has(p)) {
+      parts.push(p);
+      seen.add(p);
+    }
+  }
+  return parts.join(path.delimiter);
+}
+
+// TTL cache for findClaudeBinary to avoid repeated filesystem probes.
+// Only caches "found" results; "not found" is never cached so a fresh
+// install is detected immediately on the next check.
+let _cachedBinaryPath: string | undefined | null = null; // null = not cached
+let _cachedBinaryTimestamp = 0;
+const BINARY_CACHE_TTL = 60_000; // 60 seconds
+
+/**
+ * Invalidate all cached binary paths.
+ * Must be called after a new installation so that subsequent SDK calls
+ * pick up the freshly-installed binary instead of a stale npm/bun path.
+ */
+export function invalidateClaudePathCache(): void {
+  _cachedBinaryPath = null;
+  _cachedBinaryTimestamp = 0;
+}
+
+/**
+ * Find and validate the Claude CLI binary.
+ * Positive results are cached for 60s; negative results are never cached.
+ */
+export function findClaudeBinary(): string | undefined {
+  const now = Date.now();
+  if (_cachedBinaryPath !== null && now - _cachedBinaryTimestamp < BINARY_CACHE_TTL) {
+    return _cachedBinaryPath;
+  }
+
+  const found = _findClaudeBinaryUncached();
+  if (found) {
+    _cachedBinaryPath = found;
+    _cachedBinaryTimestamp = now;
+  } else {
+    // Don't cache "not found" — user may install CLI any moment
+    _cachedBinaryPath = null;
+  }
+  return found;
+}
+
+function _findClaudeBinaryUncached(): string | undefined {
+  // Two-pass strategy:
+  // Pass 1: file existence (cheap, won't timeout). If found, validate with --version.
+  // Pass 2 (fallback): if --version times out (slow VPN / WSL2), still return the path
+  //   so the SDK can try to spawn it — the user likely has a working binary, just slow.
+  //
+  // Bumped the timeout from 3s → 5s in 2026-04-15: the 3s threshold was tight
+  // for users on slow filesystems (WSL2, network-mounted homes) and contributed
+  // to "Claude Code native binary not found" Sentry events even though the
+  // binary was actually present.
+  const TIMEOUT_MS = 5000;
+  const candidates = getClaudeCandidatePaths();
+
+  // Pass 1: cheap fs.existsSync to find candidates that actually exist on disk
+  const existing: string[] = [];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) existing.push(p);
+    } catch { /* permission denied — skip */ }
+  }
+
+  // Validate each existing candidate. Return the first that responds to --version.
+  // If a candidate exists but --version times out, remember it as a fallback.
+  let timedOutFallback: string | undefined;
+  for (const p of existing) {
+    try {
+      execFileSync(p, ['--version'], {
+        timeout: TIMEOUT_MS,
+        stdio: 'pipe',
+        shell: needsShell(p),
+      });
+      return p;
+    } catch (err) {
+      // Distinguish "file doesn't behave like a CLI" from "validation timed out".
+      // Spawn timeout in execFileSync surfaces as ETIMEDOUT or err.signal === 'SIGTERM'.
+      const e = err as { code?: string; signal?: string };
+      if ((e.code === 'ETIMEDOUT' || e.signal === 'SIGTERM') && !timedOutFallback) {
+        timedOutFallback = p;
+      }
+      // Otherwise keep trying other candidates.
+    }
+  }
+
+  // Fallback: use `where` (Windows) or `which` (Unix) with expanded PATH
+  try {
+    const cmd = isWindows ? WHERE_EXE : '/usr/bin/which';
+    const args = isWindows ? ['claude'] : ['claude'];
+    const result = execFileSync(cmd, args, {
+      timeout: TIMEOUT_MS,
+      stdio: 'pipe',
+      env: { ...process.env, PATH: getExpandedPath() },
+      shell: false,
+    });
+    // where.exe may return multiple lines; try each with --version validation.
+    // 无扩展名的候选先滤掉(见 isSpawnableBinary)，否则 spawn sh 脚本会弹系统错误框。
+    const lines = result.toString().trim().split(/\r?\n/);
+    for (const line of lines) {
+      const candidate = line.trim();
+      if (!candidate || !isSpawnableBinary(candidate)) continue;
+      try {
+        execFileSync(candidate, ['--version'], {
+          timeout: TIMEOUT_MS,
+          stdio: 'pipe',
+          shell: needsShell(candidate),
+        });
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // not found
+  }
+
+  // Last resort: a candidate exists on disk but timed out validating. Return
+  // it anyway — the SDK gets a real path to try, instead of silently falling
+  // back to its own hardcoded default which generates the most-useless
+  // "Claude Code native binary not found at <some path>" Sentry error.
+  return timedOutFallback;
+}
+
+/**
+ * Execute claude --version and return the version string.
+ * Handles .cmd shell execution on Windows.
+ */
+export async function getClaudeVersion(claudePath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(claudePath, ['--version'], {
+      timeout: 5000,
+      env: { ...process.env, PATH: getExpandedPath() },
+      shell: needsShell(claudePath),
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect if Claude Code was installed via WinGet on Windows.
+ * WinGet installs to the same path as native (~/.local/bin/), so path-based
+ * classification can't distinguish them. This checks WinGet's package list.
+ * Result is cached for the process lifetime.
+ */
+let _wingetDetectionResult: boolean | null = null;
+
+export async function isWingetInstall(): Promise<boolean> {
+  if (!isWindows) return false;
+  if (_wingetDetectionResult !== null) return _wingetDetectionResult;
+  try {
+    const { stdout } = await execFileAsync('winget', ['list', 'Anthropic.ClaudeCode', '--accept-source-agreements'], {
+      timeout: 5000,
+      shell: true,
+      env: { ...process.env, PATH: getExpandedPath() },
+    });
+    _wingetDetectionResult = stdout.includes('Anthropic.ClaudeCode');
+  } catch {
+    _wingetDetectionResult = false;
+  }
+  return _wingetDetectionResult;
+}
+
+/** Invalidate winget detection cache (e.g. after upgrade) */
+export function invalidateWingetCache(): void {
+  _wingetDetectionResult = null;
+}
+
+/**
+ * Get the upgrade command for a given install type.
+ */
+export interface UpgradeCommand {
+  command: string;
+  args: string[];
+  shell: boolean;
+}
+
+export function getUpgradeCommand(installType: ClaudeInstallType): UpgradeCommand {
+  switch (installType) {
+    case 'homebrew':
+      return { command: 'brew', args: ['upgrade', 'claude-code'], shell: false };
+    case 'npm':
+      // On Windows, npm is a .cmd file that requires shell execution
+      return { command: 'npm', args: ['update', '-g', '@anthropic-ai/claude-code'], shell: isWindows };
+    case 'bun':
+      return { command: 'bun', args: ['update', '-g', '@anthropic-ai/claude-code'], shell: false };
+    case 'winget':
+      return { command: 'winget', args: ['upgrade', 'Anthropic.ClaudeCode', '--accept-source-agreements'], shell: true };
+    case 'native':
+    case 'unknown':
+    default:
+      // `claude update` is the official manual update command for native installs.
+      // It works cross-platform and is simpler than re-running the install script.
+      return { command: 'claude', args: ['update'], shell: false };
+  }
+}
+
+/**
+ * Find Git Bash (bash.exe) on Windows.
+ * Returns the path to bash.exe or null if not found.
+ */
+export function findGitBash(): string | null {
+  // 1. Check user-specified environment variable
+  const envPath = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  if (envPath && fs.existsSync(envPath)) {
+    return envPath;
+  }
+
+  // 2. Check common installation paths
+  const commonPaths = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ];
+  for (const p of commonPaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  // 3. Try to locate git.exe via `where git` and derive bash.exe path
+  try {
+    const result = execFileSync(WHERE_EXE, ['git'], {
+      timeout: 3000,
+      stdio: 'pipe',
+      shell: false,
+    });
+    const lines = result.toString().trim().split(/\r?\n/);
+    for (const line of lines) {
+      const gitExe = line.trim();
+      if (!gitExe) continue;
+      // git.exe is typically at <GitDir>\cmd\git.exe or <GitDir>\bin\git.exe
+      const gitDir = path.dirname(path.dirname(gitExe));
+      const bashPath = path.join(gitDir, 'bin', 'bash.exe');
+      if (fs.existsSync(bashPath)) {
+        return bashPath;
+      }
+    }
+  } catch {
+    // where git failed or timed out
+  }
+
+  return null;
+}

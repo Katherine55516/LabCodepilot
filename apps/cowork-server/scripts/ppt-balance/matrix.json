@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "note": "Paths outside the repository are local research fixtures; missing files are reported and skipped. templateClass groups Gamma references into comparable bands.",
+  "inputs": [
+    { "id": "factor-testing", "kind": "paste", "path": "/Users/dongli/Documents/quant_research/quant_3.0/09_factor_testing.md", "traits": ["bilingual", "code", "math", "tables", "long"] },
+    { "id": "factor-zoo", "kind": "paste", "path": "/Users/dongli/Documents/quant_research/quant_3.0/04_factor_zoo_overview.md", "traits": ["bilingual", "tables", "long"] },
+    { "id": "alpha-mining", "kind": "paste", "path": "/Users/dongli/Documents/quant_research/quant_3.0/10_alpha_mining.md", "traits": ["bilingual", "code", "long"] },
+    { "id": "backtesting", "kind": "paste", "path": "/Users/dongli/Documents/quant_research/quant_3.0/11_backtesting.md", "traits": ["bilingual", "code", "math", "long"] },
+    { "id": "english-architecture", "kind": "paste", "path": "/Users/dongli/Documents/ChatGPT/CodePilot/open_source_ppt_agent_projects.md", "traits": ["english-dominant", "tables"] },
+    { "id": "chinese-review", "kind": "paste", "path": "docs/research/ppt-input-scope-harness-review-20261008.md", "traits": ["chinese", "tables"] },
+    { "id": "business-prompt", "kind": "prompt", "prompt": "面向管理层生成 Q4 产品增长复盘：说明增长来源、主要风险、下季度行动，以及需要管理层拍板的两个决定。", "traits": ["short-prompt", "business"] },
+    { "id": "table-csv", "kind": "file", "path": "outputs/ppt-general-render-contract-20261008/csv/sources/f79bf40d8fbe255e82959e484a744ea73b5d9d894604ca09c6c9e1363717f591.csv", "traits": ["table"] }
+  ],
+  "templates": [
+    { "id": "deal-review", "path": "/Users/dongli/Downloads/Copy-of-Deal-Review (1).pptx", "templateClass": "photo-business" },
+    { "id": "process-improvement", "path": "/Users/dongli/Downloads/Copy-of-Process-Improvement-Proposal.pptx", "templateClass": "icon-photo-proposal" },
+    { "id": "performance-review", "path": "/Users/dongli/Downloads/Copy-of-Performance-Review-Framework.pptx", "templateClass": "framework-report" },
+    { "id": "capabilities-overview", "path": "/Users/dongli/Downloads/Copy-of-Capabilities-Overview.pptx", "templateClass": "capabilities" },
+    { "id": "mood-board", "path": "/Users/dongli/Downloads/Copy-of-Mood-Board.pptx", "templateClass": "visual-board" },
+    { "id": "builtin-education", "builtin": "education", "templateClass": "builtin-mapped" },
+    { "id": "builtin-light", "builtin": "light", "templateClass": "builtin-mapped" }
+  ],
+  "gammaReferences": [
+    { "id": "gamma-alpha-mining-deal-review", "path": "/Users/dongli/Downloads/Alpha-Mining.pptx", "template": "deal-review", "input": "alpha-mining" },
+    { "id": "gamma-factor-zoo-process-improvement", "path": "/Users/dongli/Downloads/The-Factor-Zoo (1).pptx", "template": "process-improvement", "input": "factor-zoo" },
+    { "id": "gamma-factor-zoo-earlier", "path": "/Users/dongli/Downloads/The-Factor-Zoo.pptx", "template": null, "templateClass": "unknown", "input": "factor-zoo" },
+    { "id": "gamma-deep-learning", "path": "/Users/dongli/Downloads/Deep-learning-for-quantitative-finance.pptx", "template": null, "templateClass": "unknown", "input": null },
+    { "id": "gamma-ai-architecture", "path": "/Users/dongli/Documents/ChatGPT/CodePilot/Gamma-AI.pptx", "template": null, "templateClass": "unknown", "input": null },
+    { "id": "gamma-compiler-alpha-mining", "path": "outputs/alpha-mining-gamma-live-observation-20261008/gamma-compiler-initial.pptx", "template": null, "templateClass": "code-lesson", "input": "alpha-mining", "note": "Gamma Agent, 10-slide Free-plan limit" }
+  ],
+  "domReferences": [
+    { "id": "gamma-sample-size-factor-testing", "templateClass": "lesson-data", "input": "factor-testing", "evidence": "outputs/factor-testing-gamma-live-observation-20261008/final-deck-and-measurements.md",
+      "note": "Editor DOM only (no export); innerText chars per slide, English words per slide; 10-slide Free-plan limit",
+      "slides": 10, "innerTextChars": [299, 648, 599, 606, 434, 645, 566, 616, 454, 507], "latinWords": [36, 83, 81, 93, 59, 110, 81, 66, 57, 70],
+      "verticalFill": [0.78, 0.87], "media": { "large": 3, "tables": 2, "displayFormulas": 5 }, "bodyPt": 18 }
+  ],
+  "moduleOutputs": [
+    { "id": "module-alpha-mining-deal-review", "path": "outputs/alpha-mining-deal-review-simulation-20261008/alpha-mining-deal-review.pptx", "template": "deal-review", "input": "alpha-mining", "llm": "simulated" },
+    { "id": "module-factor-zoo-process-improvement", "path": "outputs/factor-zoo-process-improvement-22-slides-simulated.pptx", "template": "process-improvement", "input": "factor-zoo", "llm": "simulated" },
+    { "id": "module-factor-zoo-mood-board", "path": "outputs/factor-zoo-mood-board-simulated-20261007/factor-zoo-mood-board.pptx", "template": "mood-board", "input": "factor-zoo", "llm": "simulated" }
+  ]
+}

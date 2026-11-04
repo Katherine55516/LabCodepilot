@@ -1,0 +1,3050 @@
+import { app, BrowserWindow, Notification, nativeImage, dialog, session, utilityProcess, ipcMain, shell, Tray, Menu, systemPreferences } from 'electron';
+import path from 'path';
+import { execFileSync, spawn, fork, ChildProcess } from 'child_process';
+import fs from 'fs';
+import net from 'net';
+import os from 'os';
+import { TerminalManager } from './terminal-manager';
+
+// ── Managed-account login system (deliberately isolated from openai-oauth*) ──
+import {
+  tryUseCachedToken,
+  loginViaBrowser,
+  fetchMe,
+  registerDevice,
+  getConfigs,
+  fetchUsage,
+  fetchImageConfig,
+  fetchCoworkConfig,
+  anlLogout,
+} from './auth/client';
+import {
+  openLoginWindow,
+  notifyLoginSuccess,
+  notifyLoginSkip,
+  cancelLoginWindow,
+  isLoginWindowOpen,
+  focusLoginWindow,
+} from './auth/login-window';
+import { startBackgroundPolling, stopBackgroundPolling } from './auth/poller';
+import {
+  startTestUsageScheduler,
+  stopTestUsageScheduler,
+  scheduleTestUsageUpload,
+} from './auth/test-usage-uploader';
+import {
+  modelConfigToManagedProviderRow,
+} from './auth/managed-providers';
+import {
+  setBrokerServerPort,
+  syncManagedProvidersToServer,
+  purgeManagedProvidersOnServer,
+  syncImageConfigToServer,
+  purgeImageConfigOnServer,
+  syncCoworkConfigToServer,
+  purgeCoworkConfigOnServer,
+  syncCurrentUserToServer,
+} from './auth/broker';
+import { clearAuthState, loadToken } from './auth/storage';
+import { getBackendBase } from './auth/config';
+import {
+  normalizeFeedbackMessage,
+  buildFeedbackForm,
+  postFeedback,
+  isAllowedFeedbackImage,
+  FEEDBACK_MAX_IMAGES,
+  FEEDBACK_IMAGE_MAX_BYTES,
+  type FeedbackImageInput,
+} from './feedback-core';
+import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
+import { logInfo, logWarn, logError } from './auth/log';
+import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
+
+// ── Voice input (Bailian realtime ASR) ──
+import { RealtimeAsrSession } from './asr/realtime-session';
+import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
+
+// ── Test Accounts: 获取登录态 capture (BrowserWindow → Playwright storageState) ──
+import { startCapture, finishCaptureSelf, cancelCapture, cancelCaptureByUser, getCaptureStatus, clearCaptured, registerCaptureNotifier } from './test-auth-capture/capture-window';
+
+// File logger — persists main-process logs, the forked Next-server's piped
+// stdout/stderr (re-console.log'd below), and renderer console output to
+// app.getPath('logs'). Secrets are scrubbed before writing. See electron/logger.ts.
+import { initFileLogger, openLogsFolder, getLogDir, logRendererConsole, registerKnownSecretsFromEnv } from './logger';
+
+// Native auto-updater (research-platform V2). Reuses the managed-account auth
+// infra (apiRequest Bearer + getBackendBase) for the authenticated check.
+import { initUpdater, registerUpdaterIpc, stopUpdater } from './updater';
+
+// One-shot cleanup of the retired vendor-bundled GSD plugin. Removes the 399
+// files earlier versions mirrored into ~/.claude/. See electron/gsd-purge.ts.
+import { purge as purgeGsdResidue } from './gsd-purge';
+
+// 技能市场（内部）— codeagent-server Skills 商店 BFF 的主进程代理。
+import { registerSkillsStoreIpc } from './skills-store';
+
+// Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
+// on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
+import {
+  install as installAilabBundle,
+  registerAilabIpc,
+} from './ailab-installer';
+
+// Auto-inject `skipWebFetchPreflight: true` into ~/.claude/settings.json on
+// startup so users behind enterprise networks / GFW don't hit the
+// "Unable to verify if domain X is safe to fetch" error from Claude Code's
+// preflight call to api.anthropic.com. Respects user's explicit value if set.
+import { ensureSkipWebFetchPreflight } from '../src/lib/claude-settings';
+
+/**
+ * Return a copy of process.env without __NEXT_PRIVATE_* variables.
+ *
+ * The bundled Next.js standalone server sets these at runtime
+ * (e.g. __NEXT_PRIVATE_STANDALONE_CONFIG, __NEXT_PRIVATE_ORIGIN).
+ * If they leak into child-process environments they cause every
+ * other Next.js project on the machine to skip its own config
+ * loading, breaking builds and dev servers.
+ */
+function sanitizedProcessEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('__NEXT_PRIVATE_') && value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+let mainWindow: BrowserWindow | null = null;
+// Windows 下是 child_process.fork 的纯 Node 子进程,macOS/Linux 下是 utilityProcess —— 见 startServer。
+let serverProcess: Electron.UtilityProcess | ChildProcess | null = null;
+let serverPort: number | null = null;
+let serverErrors: string[] = [];
+let serverExited = false;
+let serverExitCode: number | null = null;
+let userShellEnv: Record<string, string> = {};
+let resolvedProxyEnv: Record<string, string> = {};
+let isQuitting = false;
+// 「这次 server 退出是我们主动杀的」标记 —— killServer() 与端口重试路径置位。
+//
+// 为什么 isQuitting 不够用:Windows 关窗走 window-all-closed → killServer() →
+// `taskkill /T /F` ⇒ 子进程退出码 1,而 isQuitting 要等 before-quit 才置位(且
+// 那时 serverProcess 已被置 null、分支根本进不去)。结果每一次正常关窗都被 exit
+// 回调误判成「异常退出 code=1」并排队一次「1500ms 后自动重启」——实测用户日志里
+// 20 次"崩溃"全部是关窗,且进程随即退出、那条重启从未真正执行过(50 次启动 / 52 次
+// spawn 全部来自启动流程,0 次来自重启路径)。假崩溃会把真崩溃淹掉,故单独标记。
+let serverKillIntentional = false;
+// server 崩溃自动重启:崩溃后 respawn,限次避免确定性崩溃导致的无限重启烧 CPU。
+let serverRestartCount = 0;
+let serverStartedAt = 0;
+const MAX_SERVER_RESTARTS = 3;
+const SERVER_RESTART_DELAY_MS = 1500;
+const SERVER_STABLE_MS = 90_000; // server 稳定运行超过此时长 → 视为已恢复,重置重启计数
+// 渲染进程崩溃自愈:窗口崩了就重新加载。同样限次 —— "一加载就崩"时无限重载只会
+// 刷屏,不如停下把 reason 留在日志里。见 createWindow 的 'render-process-gone'。
+const MAX_RENDERER_RELOADS = 3;
+const RENDERER_RELOAD_WINDOW_MS = 60_000;
+const RENDERER_RELOAD_DELAY_MS = 500; // 等崩溃的 renderer 彻底回收再重载
+let rendererReloadTimes: number[] = [];
+let tray: Tray | null = null;
+let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
+let metricsTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── Managed-account auth state (held in-memory; tokens stay on disk) ──
+let currentMe: MeInfo | null = null;
+let isOfflineMode = false;
+let managedConfigCount = 0;
+
+// --- Install orchestrator ---
+interface InstallStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+  error?: string;
+}
+
+interface InstallState {
+  status: 'idle' | 'running' | 'success' | 'failed' | 'cancelled';
+  currentStep: string | null;
+  steps: InstallStep[];
+  logs: string[];
+}
+
+let installState: InstallState = {
+  status: 'idle',
+  currentStep: null,
+  steps: [],
+  logs: [],
+};
+
+let installProcess: ChildProcess | null = null;
+
+const terminalManager = new TerminalManager();
+
+const isDev = !app.isPackaged;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Server pidfile —— 解决"端口漂移导致 localStorage 丢失"的根因。
+//
+// 背景：renderer 的 localStorage 按 origin(localhost:端口)隔离。打包版每次
+// 启动都尽量绑定固定端口(STABLE_PORTS 首个 47823)以保证 origin 一致。但
+// **非正常退出**(崩溃 / 任务管理器强杀 / 断电)不会走 before-quit →
+// killServer() 没机会执行 → 上次 fork 的 Next server 残留进程继续占着 47823 →
+// 本次启动探测到 47823 被占、跳到 47824…… origin 变化 → 用户的测试项目等
+// localStorage 数据"消失"。残留累积占满 8 个稳定端口后还会回退随机端口(每次都丢)。
+//
+// 方案:fork 成功后把 server pid 写到固定文件;下次启动在探测端口之前先读这个
+// 文件,若进程仍存活就杀掉它(释放上次占用的端口),从而稳定回到 47823。
+//
+// pidfile 路径与注入 server 的 CLAUDE_GUI_DATA_DIR(见 startServer)保持一致:
+//   <os.homedir()>/.codepilot/.server.pid
+const SERVER_PID_FILE = path.join(os.homedir(), '.codepilot', '.server.pid');
+
+/** 把当前 server 进程的 pid 写入 pidfile(目录不存在则创建)。失败仅告警,不影响启动。 */
+function writeServerPidFile(pid: number): void {
+  try {
+    fs.mkdirSync(path.dirname(SERVER_PID_FILE), { recursive: true });
+    fs.writeFileSync(SERVER_PID_FILE, String(pid), 'utf8');
+  } catch (err) {
+    console.warn(`[pidfile] 写入 ${SERVER_PID_FILE} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** 删除 pidfile(正常退出 / 清理残留后调用),避免下次误判。文件不存在不报错。 */
+function removeServerPidFile(): void {
+  try {
+    fs.rmSync(SERVER_PID_FILE, { force: true });
+  } catch { /* 不存在或无权限,忽略 */ }
+}
+
+/** 进程是否存活:用信号 0 探测(不真正发信号),包 try/catch。 */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = 进程不存在 → false;EPERM = 进程存在但无权限发信号 → 视为存活。
+    // (我方 server 与主进程同一用户,正常不会出现 EPERM,这里只是保险。)
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+/**
+ * 校验某 pid 看起来确实是我们 fork 的 Next server,降低 pid 被系统复用后误杀的概率。
+ *
+ * 取舍:跨平台精确校验(读 /proc、解析命令行)实现成本高。这里做轻量校验:
+ *  - Windows: 用 `tasklist /FI "PID eq <pid>"`,输出里含 node/electron/codepilot
+ *    才认为可杀;拿不到输出时保守返回 false(不杀)。
+ *  - 非 Windows: 用 `ps -p <pid> -o command=` 读命令行,含 server.js / codepilot /
+ *    node / electron 才可杀;`ps` 不可用或异常时退而返回 true(允许杀)——因为
+ *    pidfile 是我们自己写的、且紧接着会删除,复用窗口极小,残留误杀的风险可接受。
+ */
+function looksLikeOurServer(pid: number): boolean {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], {
+        encoding: 'utf8',
+        timeout: 3000,
+      }).toLowerCase();
+      // 无匹配进程时 tasklist 输出 "INFO: No tasks..." —— 不含进程名,自然返回 false。
+      return /node|electron|codepilot/.test(out);
+    }
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 3000,
+    }).toLowerCase();
+    return /server\.js|codepilot|node|electron/.test(out);
+  } catch {
+    // 校验命令本身失败(ps/tasklist 不可用、超时等):非 Windows 放行(见上方取舍说明),
+    // Windows 保守不杀,避免在拿不到信息时误杀其它进程。
+    return process.platform !== 'win32';
+  }
+}
+
+/**
+ * 启动前清理上次残留的 server 进程。
+ *
+ * 读 pidfile;若 pid 仍存活且校验像我们的 server,就杀掉它(Windows 用
+ * `taskkill /T /F /PID` 杀进程树,其它平台 process.kill SIGKILL),释放它占用的端口,
+ * 让本次启动稳定回到 STABLE_PORTS 首个(47823)、保持 localStorage origin 一致。
+ * 最后删除 pidfile。整个过程包 try/catch,任何异常都不应阻塞正常启动。
+ */
+function reapOrphanServer(): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(SERVER_PID_FILE, 'utf8').trim();
+  } catch {
+    return; // 没有 pidfile —— 上次正常退出或首次启动,无需清理。
+  }
+
+  const pid = Number.parseInt(raw, 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    console.warn(`[pidfile] 内容非法(${JSON.stringify(raw)}),直接删除`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (pid === process.pid) {
+    // 极端兜底:pidfile 写的是当前主进程自身,绝不能自杀。
+    removeServerPidFile();
+    return;
+  }
+
+  if (!isPidAlive(pid)) {
+    console.log(`[pidfile] 残留 pid ${pid} 已不存在,清理 pidfile`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (!looksLikeOurServer(pid)) {
+    // pid 可能已被系统复用为无关进程,放弃杀它,只清理 pidfile。
+    console.warn(`[pidfile] pid ${pid} 仍存活但校验不像本应用 server,跳过清理(可能 pid 已被复用)`);
+    removeServerPidFile();
+    return;
+  }
+
+  console.warn(`[pidfile] 发现残留 server 进程 pid ${pid}(上次非正常退出),正在清理以释放端口`);
+  try {
+    if (process.platform === 'win32') {
+      // /T 连同子进程树一起杀,/F 强杀。
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch (err) {
+    console.warn(`[pidfile] 杀残留进程 ${pid} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  removeServerPidFile();
+}
+
+/**
+ * Gracefully shut down the server process.
+ * Sends kill() (SIGTERM) first, waits up to 3s for exit,
+ * then force-kills via process.kill(pid, SIGKILL) as fallback.
+ */
+function killServer(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!serverProcess) {
+      resolve();
+      return;
+    }
+
+    // 主动终结 —— 下面的 taskkill/SIGKILL 会让子进程以非 0 码退出,提前打标
+    // 避免 handleExit 把它当成崩溃(见 serverKillIntentional 注释)。
+    serverKillIntentional = true;
+
+    const pid = serverProcess.pid;
+
+    const timeout = setTimeout(() => {
+      // Force kill — on Windows use taskkill to kill the entire process tree
+      if (pid) {
+        try {
+          if (process.platform === 'win32') {
+            spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+          } else {
+            process.kill(pid, 'SIGKILL');
+          }
+        } catch { /* already dead */ }
+      }
+      serverProcess = null;
+      // 进程已被强杀,删除 pidfile,避免下次启动误判为残留(见 SERVER_PID_FILE 注释)。
+      removeServerPidFile();
+      resolve();
+    }, 3000);
+
+    // UtilityProcess 与 ChildProcess 都有 'exit' 事件,但 TS 对联合类型的 .on 重载取交集后
+    // 收窄到只剩 'spawn'/'message',故显式收窄到 ChildProcess 形态调用(运行时两者行为一致)。
+    (serverProcess as ChildProcess).on('exit', () => {
+      clearTimeout(timeout);
+      serverProcess = null;
+      // 进程已正常退出,删除 pidfile。
+      removeServerPidFile();
+      resolve();
+    });
+
+    // On Windows, SIGTERM is not supported — use taskkill to kill the tree
+    if (process.platform === 'win32' && pid) {
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+    } else {
+      serverProcess.kill();
+    }
+  });
+}
+
+/**
+ * Check if the remote bridge is currently active by querying the local API.
+ */
+async function isBridgeActive(): Promise<boolean> {
+  if (!serverPort) return false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const http = require('http');
+    return await new Promise<boolean>((resolve) => {
+      const req = http.get(`http://127.0.0.1:${serverPort}/api/bridge`, (res: { statusCode?: number; on: (event: string, cb: (data: Buffer) => void) => void }) => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            resolve(data.running === true);
+          } catch {
+            resolve(false);
+          }
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stop the remote bridge by posting to the local API.
+ */
+async function stopBridge(): Promise<void> {
+  if (!serverPort) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const http = require('http');
+    await new Promise<void>((resolve) => {
+      const postData = JSON.stringify({ action: 'stop' });
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: serverPort,
+        path: '/api/bridge',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      }, () => { resolve(); });
+      req.on('error', () => resolve());
+      req.setTimeout(3000, () => { req.destroy(); resolve(); });
+      req.write(postData);
+      req.end();
+    });
+  } catch {
+    // ignore — bridge may already be stopped
+  }
+}
+
+/**
+ * Create a system tray icon for background bridge mode.
+ * Called when all windows are closed but the bridge is still active.
+ */
+function createTray(): void {
+  if (tray) return;
+
+  const iconPath = getIconPath();
+  const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  tray = new Tray(trayIcon);
+  tray.setToolTip('AIMate — Bridge Active');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Open AIMate',
+      click: () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          createWindow(`http://127.0.0.1:${serverPort || 3000}`);
+        } else {
+          mainWindow?.focus();
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Bridge Status: Active',
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: 'Stop Bridge & Quit',
+      click: async () => {
+        await stopBridge();
+        destroyTray();
+        await killServer();
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  // Double-click on tray icon opens the window (macOS/Windows)
+  tray.on('double-click', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow(`http://127.0.0.1:${serverPort || 3000}`);
+    } else {
+      mainWindow?.focus();
+    }
+  });
+}
+
+function destroyTray(): void {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+  stopBgNotifyPoll();
+}
+
+/**
+ * Parse notification API response. Canonical version: src/lib/bg-notify-parser.ts
+ */
+function parseBgNotifications(json: string): Array<{ title: string; body: string; priority: string }> {
+  try {
+    const parsed = JSON.parse(json);
+    const notifications: Array<{ title: string; body: string; priority: string }> = parsed.notifications || [];
+    return notifications.filter((n: { title: string }) => n.title);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Background notification poller — runs in main process when no renderer window
+ * is open (tray-only mode). Drains the server-side notification queue and shows
+ * native Notification directly, bypassing the renderer's useNotificationPoll.
+ */
+function startBgNotifyPoll(): void {
+  if (bgNotifyTimer) return;
+  const port = serverPort || 3000;
+
+  bgNotifyTimer = setInterval(async () => {
+    // Stop polling if a renderer window exists (frontend will handle it)
+    if (BrowserWindow.getAllWindows().length > 0) {
+      stopBgNotifyPoll();
+      return;
+    }
+
+    try {
+      const http = await import('http');
+      const data = await new Promise<string>((resolve, reject) => {
+        const req = http.get(`http://127.0.0.1:${port}/api/tasks/notify`, (res) => {
+          let body = '';
+          res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+          res.on('end', () => resolve(body));
+        });
+        req.on('error', reject);
+        req.setTimeout(3000, () => { req.destroy(); reject(new Error('timeout')); });
+      });
+
+      const notifications = parseBgNotifications(data);
+      for (const notif of notifications) {
+        try {
+          const notification = new Notification({
+            title: notif.title,
+            body: notif.body || '',
+          });
+          notification.on('click', () => {
+            // Re-open the main window when user clicks the notification
+            if (BrowserWindow.getAllWindows().length === 0) {
+              createWindow(`http://127.0.0.1:${port}`);
+            }
+            mainWindow?.show();
+            mainWindow?.focus();
+          });
+          notification.show();
+        } catch { /* best effort */ }
+      }
+    } catch {
+      // Server may not be reachable — ignore
+    }
+  }, 5000);
+}
+
+function stopBgNotifyPoll(): void {
+  if (bgNotifyTimer) {
+    clearInterval(bgNotifyTimer);
+    bgNotifyTimer = null;
+  }
+}
+
+/**
+ * 进程内存采样 —— 白屏排查的第二只眼。
+ *
+ * 渲染进程被 OOM 干掉时,render-process-gone 只给得出 reason=oom/crashed,回答不了
+ * 「涨到多少、涨了多久、是哪个进程」。每 5 分钟记一行各进程 working set,崩溃前的
+ * 增长曲线就留在日志里,事后一眼能分辨「渲染进程内存爬到天花板」和「驱动/EDR 把
+ * 进程干掉」这两类根因 —— 后者内存曲线是平的。
+ *
+ * 刻意做成单行:日志按大小轮转(见 logger.ts),多行采样会把有用的上下文挤出去。
+ */
+const METRICS_SAMPLE_INTERVAL_MS = 5 * 60_000;
+// Chromium 渲染进程通常在 2~4GB 附近被 OOM 终结。过线就升级成 WARN,
+// 让「崩之前其实已经报过警」这件事在日志里可检索。
+const RENDERER_WARN_MB = 1500;
+
+function sampleProcessMetrics(): void {
+  try {
+    const metrics = app.getAppMetrics();
+    let totalMb = 0;
+    let maxRendererMb = 0;
+    const parts: string[] = [];
+    for (const m of metrics) {
+      // ProcessMetric.memory.workingSetSize 单位是 KB。
+      const sizeMb = Math.round((m.memory?.workingSetSize ?? 0) / 1024);
+      totalMb += sizeMb;
+      // 渲染进程在 Electron 的口径里是 'Tab'。
+      if (m.type === 'Tab') maxRendererMb = Math.max(maxRendererMb, sizeMb);
+      const label = m.name ? `${m.type}(${m.name})` : m.type;
+      parts.push(`${label}#${m.pid}=${sizeMb}MB`);
+    }
+    const line = `[metrics] total=${totalMb}MB ${parts.join(' ')}`;
+    if (maxRendererMb >= RENDERER_WARN_MB) {
+      console.warn(`${line} —— 渲染进程已达 ${maxRendererMb}MB,接近 OOM 风险区`);
+    } else {
+      console.log(line);
+    }
+  } catch (err) {
+    console.warn(`[metrics] 采样失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function startMetricsSampling(): void {
+  if (metricsTimer) return;
+  sampleProcessMetrics(); // 先落一条基线,否则最早的数据点要等 5 分钟
+  metricsTimer = setInterval(sampleProcessMetrics, METRICS_SAMPLE_INTERVAL_MS);
+}
+
+function stopMetricsSampling(): void {
+  if (metricsTimer) {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
+  }
+}
+
+/**
+ * Verify that better_sqlite3.node in standalone resources is compatible
+ * with this Electron runtime's ABI. If it was built for a different
+ * Node.js ABI (e.g. system Node v22 ABI 127 vs Electron's ABI 143),
+ * show a clear error instead of a cryptic MODULE_NOT_FOUND crash.
+ */
+function checkNativeModuleABI(): void {
+  if (isDev) return; // Skip in dev mode
+
+  const standaloneDir = path.join(process.resourcesPath, 'standalone');
+
+  // Find better_sqlite3.node recursively
+  function findNodeFile(dir: string): string | null {
+    if (!fs.existsSync(dir)) return null;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const found = findNodeFile(fullPath);
+        if (found) return found;
+      } else if (entry.name === 'better_sqlite3.node') {
+        return fullPath;
+      }
+    }
+    return null;
+  }
+
+  const nodeFile = findNodeFile(path.join(standaloneDir, 'node_modules'));
+  if (!nodeFile) {
+    console.warn('[ABI check] better_sqlite3.node not found in standalone resources');
+    return;
+  }
+
+  try {
+    // Attempt to load the native module to verify ABI compatibility
+    process.dlopen({ exports: {} } as NodeModule, nodeFile);
+    console.log(`[ABI check] better_sqlite3.node ABI is compatible (${nodeFile})`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('NODE_MODULE_VERSION')) {
+      console.error(`[ABI check] ABI mismatch detected: ${msg}`);
+      dialog.showErrorBox(
+        'AIMate - Native Module ABI Mismatch',
+        `The bundled better-sqlite3 native module was compiled for a different Node.js version.\n\n` +
+        `${msg}\n\n` +
+        `This usually means the build process did not correctly recompile native modules for Electron.\n` +
+        `Please rebuild the application or report this issue.`
+      );
+      app.quit();
+    } else {
+      // Other load errors (missing dependencies, etc.) -- log but don't block
+      console.warn(`[ABI check] Could not verify better_sqlite3.node: ${msg}`);
+    }
+  }
+}
+
+/**
+ * Read the user's full shell environment by running a login shell.
+ * When Electron is launched from Dock/Finder (macOS) or desktop launcher
+ * (Linux), process.env is very limited and won't include vars from
+ * .zshrc/.bashrc (e.g. API keys, nvm PATH).
+ */
+function loadUserShellEnv(): Record<string, string> {
+  // Windows GUI apps inherit the full user environment
+  if (process.platform === 'win32') {
+    return {};
+  }
+  try {
+    const shell = process.env.SHELL || '/bin/zsh';
+    const result = execFileSync(shell, ['-ilc', 'env'], {
+      timeout: 5000,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const env: Record<string, string> = {};
+    for (const line of result.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx);
+        const value = line.slice(idx + 1);
+        env[key] = value;
+      }
+    }
+    console.log(`Loaded ${Object.keys(env).length} env vars from user shell`);
+    return env;
+  } catch (err) {
+    console.warn('Failed to load user shell env:', err);
+    return {};
+  }
+}
+
+/**
+ * Resolve system proxy via Chromium's proxy resolution.
+ * Chinese users often use VPN tools (Clash, Surge, etc.) that set macOS system
+ * proxy but don't export HTTP_PROXY to shell env. This detects the system proxy
+ * and returns env vars to inject into child processes.
+ */
+async function resolveSystemProxy(): Promise<Record<string, string>> {
+  const env: Record<string, string> = {};
+  try {
+    const proxyList = await session.defaultSession.resolveProxy('https://registry.npmjs.org');
+    if (!proxyList || proxyList === 'DIRECT') return env;
+
+    // Chromium returns an ordered list: "PROXY host:port; SOCKS5 host:port; DIRECT"
+    // Split on ';' and use the first non-DIRECT entry.
+    for (const entry of proxyList.split(';')) {
+      const trimmed = entry.trim();
+      if (!trimmed || trimmed === 'DIRECT') continue;
+
+      const httpMatch = trimmed.match(/^(?:PROXY|HTTPS)\s+([\w.-]+:\d+)$/i);
+      if (httpMatch) {
+        env.HTTP_PROXY = `http://${httpMatch[1]}`;
+        env.HTTPS_PROXY = `http://${httpMatch[1]}`;
+        console.log('[proxy] System proxy detected:', env.HTTPS_PROXY);
+        return env;
+      }
+
+      const socksMatch = trimmed.match(/^SOCKS5?\s+([\w.-]+:\d+)$/i);
+      if (socksMatch) {
+        env.HTTP_PROXY = `socks5://${socksMatch[1]}`;
+        env.HTTPS_PROXY = `socks5://${socksMatch[1]}`;
+        console.log('[proxy] System SOCKS proxy detected:', env.HTTPS_PROXY);
+        return env;
+      }
+    }
+  } catch (err) {
+    console.warn('[proxy] Failed to resolve system proxy:', err);
+  }
+  return env;
+}
+
+/**
+ * Check if Git Bash (bash.exe) is available on Windows.
+ * Mirrors the detection logic in platform.ts:findGitBash().
+ */
+function findGitBashSync(): boolean {
+  if (process.platform !== 'win32') return true;
+  // 1. User-specified env var
+  const envBash = process.env.CLAUDE_CODE_GIT_BASH_PATH || userShellEnv.CLAUDE_CODE_GIT_BASH_PATH;
+  if (envBash && fs.existsSync(envBash)) return true;
+  // 2. Common paths
+  if (fs.existsSync('C:\\Program Files\\Git\\bin\\bash.exe')) return true;
+  if (fs.existsSync('C:\\Program Files (x86)\\Git\\bin\\bash.exe')) return true;
+  // 3. Derive from `where git`
+  try {
+    const result = execFileSync('where', ['git'], {
+      timeout: 3000, encoding: 'utf-8', shell: true, stdio: 'pipe',
+    });
+    for (const line of result.trim().split(/\r?\n/)) {
+      const gitExe = line.trim();
+      if (!gitExe) continue;
+      const bashPath = path.join(path.dirname(path.dirname(gitExe)), 'bin', 'bash.exe');
+      if (fs.existsSync(bashPath)) return true;
+    }
+  } catch { /* where git failed */ }
+  return false;
+}
+
+/**
+ * Build an expanded PATH that includes common locations for node, npm globals,
+ * claude, nvm, homebrew, etc. Shared by the server launcher and install orchestrator.
+ */
+function getExpandedShellPath(): string {
+  const home = os.homedir();
+  const shellPath = userShellEnv.PATH || process.env.PATH || '';
+  const sep = path.delimiter;
+
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const winExtra = [
+      path.join(appData, 'npm'),
+      path.join(localAppData, 'npm'),
+      path.join(home, '.npm-global', 'bin'),
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.claude', 'bin'),
+    ];
+    const allParts = [shellPath, ...winExtra].join(sep).split(sep).filter(Boolean);
+    return [...new Set(allParts)].join(sep);
+  } else {
+    const basePath = `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`;
+    const raw = `${basePath}:${home}/.npm-global/bin:${home}/.local/bin:${home}/.claude/bin:${shellPath}`;
+    const allParts = raw.split(':').filter(Boolean);
+    return [...new Set(allParts)].join(':');
+  }
+}
+
+/**
+ * Try to bind a specific port. Resolves true if free, false if taken.
+ * Both EADDRINUSE and other errors count as "not free" (we'll try the next).
+ */
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+/**
+ * Stable port range for the embedded Next.js server.
+ *
+ * IMPORTANT: localStorage in the renderer is keyed by origin (scheme+host+port).
+ * If we pick a random OS-assigned port (`listen(0)`) every launch, localStorage
+ * is effectively wiped on every restart — which silently breaks the theme,
+ * default model badge, last-selected provider, working-directory memory, and
+ * any other UI state that uses localStorage. (See B-004 in issue tracker.)
+ *
+ * We try this range in order so the origin stays consistent across restarts.
+ * Range chosen: 47823–47830 (8 ports). These are unassigned by IANA and
+ * uncommon in practice. 8 candidates handles up to 8 concurrent AI Native Lab
+ * instances before falling back to OS-assigned, which is plenty for normal use.
+ */
+const STABLE_PORTS = [47823, 47824, 47825, 47826, 47827, 47828, 47829, 47830];
+
+/** Allocate an OS-assigned port (last-resort fallback when all stable ports fail). */
+async function getDynamicPort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (addr && typeof addr === 'object') {
+        const port = addr.port;
+        server.close(() => resolve(port));
+      } else {
+        server.close(() => reject(new Error('Failed to get port')));
+      }
+    });
+  });
+}
+
+/**
+ * Start the embedded server, choosing an available stable port.
+ *
+ * The previous implementation just probed `isPortFree` then returned the
+ * port — a classic TOCTOU race when two packaged instances launch close
+ * together (both observe 47823 free, the second one then loses with
+ * EADDRINUSE and the app crashes). This function actually attempts to bind
+ * each candidate via the real subprocess and advances to the next one if
+ * the server fails to come up due to a port conflict.
+ *
+ * Returns the bound port. Sets the global `serverProcess` as a side effect.
+ * Throws only if every candidate AND the OS-assigned fallback fail.
+ */
+async function startServerOnStablePort(): Promise<number> {
+  // 探测端口之前:先清理上次非正常退出残留的 server 进程,释放它占用的端口,
+  // 让本次启动稳定回到 47823、保持 localStorage origin 一致(见 SERVER_PID_FILE 注释)。
+  reapOrphanServer();
+
+  for (const candidate of STABLE_PORTS) {
+    // Quick pre-check skips obviously-occupied ports without spawning.
+    // Not a guarantee — but cheap, and avoids a process spawn for the common
+    // case where another app already owns 47823.
+    if (!(await isPortFree(candidate))) {
+      console.log(`[port] ${candidate} is in use, trying next stable port`);
+      continue;
+    }
+
+    console.log(`[port] Attempting stable port ${candidate}...`);
+    serverProcess = startServer(candidate);
+    try {
+      await waitForServer(candidate);
+      console.log(`[port] Bound stable port ${candidate} — localStorage origin will be consistent across restarts`);
+      return candidate;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isPortConflict = /EADDRINUSE|address.+(?:already )?in use|listen EACCES/i.test(msg);
+      console.warn(
+        `[port] Port ${candidate} failed${isPortConflict ? ' (collided with another process)' : ''}: ${msg.slice(0, 200)}` +
+        (isPortConflict ? ' — trying next stable port' : ''),
+      );
+      // Make sure the failed subprocess is dead before trying again — otherwise
+      // we'd leak processes on each retry. 同样是主动杀,打标避免误报成崩溃。
+      serverKillIntentional = true;
+      try { serverProcess?.kill(); } catch { /* already gone */ }
+      serverProcess = null;
+
+      // Non-port errors (Next.js boot crash, missing file, etc.) won't be
+      // fixed by switching ports, but we still try the rest because the cost
+      // is small and a transient error on the first port shouldn't be fatal.
+    }
+  }
+
+  // Every stable port failed — last resort: OS-assigned dynamic port.
+  // localStorage will be lost on next restart, but at least the app boots.
+  console.warn(
+    `[port] All stable ports (${STABLE_PORTS[0]}-${STABLE_PORTS[STABLE_PORTS.length - 1]}) failed; ` +
+    `falling back to OS-assigned port. UI settings stored in localStorage (theme, last model, etc.) ` +
+    `may not persist across this restart.`,
+  );
+  const dynamicPort = await getDynamicPort();
+  serverProcess = startServer(dynamicPort);
+  await waitForServer(dynamicPort);
+  return dynamicPort;
+}
+
+async function waitForServer(port: number, timeout = 30000): Promise<void> {
+  const start = Date.now();
+  let lastError = '';
+  while (Date.now() - start < timeout) {
+    // If the server process already exited, fail fast
+    if (serverExited) {
+      throw new Error(
+        `Server process exited with code ${serverExitCode}.\n\n${serverErrors.join('\n')}`
+      );
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const http = require('http');
+        // Use options object with family:4 to force IPv4 — avoids Windows
+        // IPv6 resolution issues where 127.0.0.1 may fail to connect.
+        const req = http.get({
+          hostname: '127.0.0.1',
+          port,
+          path: '/api/health',
+          family: 4,
+          timeout: 2000,
+        }, (res: { statusCode?: number }) => {
+          if (res.statusCode === 200) resolve();
+          else reject(new Error(`Status ${res.statusCode}`));
+        });
+        req.on('error', (err: Error) => reject(err));
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('request timeout'));
+        });
+      });
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+  throw new Error(
+    `Server startup timeout after ${timeout / 1000}s.\n\nLast health-check error: ${lastError}\n\n${serverErrors.length > 0 ? 'Server output:\n' + serverErrors.slice(-10).join('\n') : 'No server output captured.'}`
+  );
+}
+
+function startServer(port: number): Electron.UtilityProcess | ChildProcess {
+  const standaloneDir = path.join(process.resourcesPath, 'standalone');
+  const serverPath = path.join(standaloneDir, 'server.js');
+
+  console.log(`Server path: ${serverPath}`);
+  console.log(`Standalone dir: ${standaloneDir}`);
+
+  serverErrors = [];
+  serverExited = false;
+  serverExitCode = null;
+  serverKillIntentional = false;
+  serverStartedAt = Date.now();
+
+  const home = os.homedir();
+  const constructedPath = getExpandedShellPath();
+
+  const env: Record<string, string> = {
+    ...userShellEnv,
+    ...sanitizedProcessEnv(),
+    // Ensure user shell env vars override (especially API keys)
+    ...userShellEnv,
+    // Inject system proxy (only if not already set in shell env)
+    ...(!userShellEnv.HTTP_PROXY && !userShellEnv.HTTPS_PROXY ? resolvedProxyEnv : {}),
+    PORT: String(port),
+    HOSTNAME: '127.0.0.1',
+    CLAUDE_GUI_DATA_DIR: path.join(home, '.codepilot'),
+    HOME: home,
+    USERPROFILE: home,
+    PATH: constructedPath,
+    // Credential-encryption master key (hex). Placed AFTER the userShellEnv
+    // spreads so a stray shell var can't shadow it. Empty when safeStorage is
+    // unavailable → server-side crypto-seal falls back to plaintext passthrough.
+    CLAUDE_GUI_SECRET_KEY: getMasterKeyHex(),
+    // 打包资源根目录 —— 测试执行阶段的 Playwright MCP(src/lib/test/prompts.ts
+    // buildPlaywrightMcp)据此定位随包分发的 chromium_headless_shell。dev 态(next dev)
+    // 不经此 fork、该 env 不存在 → 回退用本机 ~/.cache/ms-playwright 的浏览器。
+    AILAB_RESOURCES_PATH: process.resourcesPath,
+  };
+
+  // Register every credential the forked server will hold (master key + the
+  // user's BYOK provider keys from userShellEnv, which never reach the main
+  // process.env) so the file logger redacts those exact values verbatim if they
+  // ever surface in the server's piped output.
+  registerKnownSecretsFromEnv(env);
+
+  // Buffer piped output and emit COMPLETE lines. Logging per logical line (not
+  // per arbitrary pipe chunk) keeps the file log readable AND lets the logger's
+  // secret scrubber see whole tokens — a value split across two 'data' events
+  // would otherwise evade redaction. A 64 KB guard bounds a runaway partial line.
+  const makeLineHandler = (tag: string, isErr: boolean) => {
+    let buf = '';
+    const emit = (line: string) => {
+      const msg = line.replace(/\r$/, '');
+      if (!msg) return;
+      (isErr ? console.error : console.log)(`${tag} ${msg}`);
+      serverErrors.push(msg);
+    };
+    return (data: Buffer) => {
+      buf += data.toString();
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        emit(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+      if (buf.length > 64 * 1024) {
+        emit(buf);
+        buf = '';
+      }
+    };
+  };
+  // 服务退出处理 —— 两种宿主进程(见下方分支)共用。child_process 语义下被信号杀时 code 为 null。
+  const handleExit = (code: number | null) => {
+    const intentional = serverKillIntentional;
+    console.log(`Server process exited with code ${code}${intentional ? ' (主动终结:关窗/退出/端口重试)' : ''}`);
+    serverExited = true;
+    serverExitCode = code;
+    serverProcess = null;
+    // 内嵌 server 异常退出(崩溃)且 app 没在主动退出 → 诊断 + 限次自动重启。
+    // 背景:实测 server ready 后约 12s 会异常退出(code≠0),之前无重启 → 之后所有请求
+    // (导入/页面/RSC)全 Failed to fetch。这里兜底恢复 + dump 崩溃前输出帮定位根因。
+    if (code !== 0 && code !== null && !isQuitting && !intentional) {
+      const ranMs = serverStartedAt ? Date.now() - serverStartedAt : 0;
+      console.error(`[server] 异常退出 code=${code},本次运行约 ${Math.round(ranMs / 1000)}s。崩溃前最后输出:`);
+      for (const line of serverErrors.slice(-30)) console.error(`[server:crash-tail] ${line}`);
+      // 稳定运行过(>SERVER_STABLE_MS)再崩 → 视为偶发,重置计数让其可持续恢复;
+      // 启动即快崩则累计到上限后停,避免无限重启循环。
+      if (ranMs > SERVER_STABLE_MS) serverRestartCount = 0;
+      if (serverRestartCount < MAX_SERVER_RESTARTS && serverPort != null) {
+        serverRestartCount++;
+        const port = serverPort;
+        console.error(`[server] ${SERVER_RESTART_DELAY_MS}ms 后自动重启 (${serverRestartCount}/${MAX_SERVER_RESTARTS})…`);
+        setTimeout(() => {
+          if (isQuitting) return;
+          serverProcess = startServer(port);
+          waitForServer(port)
+            .then(() => { console.log('[server] 重启成功,刷新窗口'); mainWindow?.webContents.reload(); })
+            .catch((e) => console.error('[server] 重启后等待就绪失败:', e instanceof Error ? e.message : String(e)));
+        }, SERVER_RESTART_DELAY_MS);
+      } else if (serverRestartCount >= MAX_SERVER_RESTARTS) {
+        console.error(`[server] 已达自动重启上限(${MAX_SERVER_RESTARTS}次),停止重启。这是确定性崩溃,请查上面的 [server:crash-tail] 定位根因。`);
+      }
+    }
+  };
+
+  let child: Electron.UtilityProcess | ChildProcess;
+  if (process.platform === 'win32') {
+    // [Windows] 用 child_process.fork(ELECTRON_RUN_AS_NODE=纯 Node 运行时)而非 utilityProcess。
+    // utilityProcess 是 Chromium utility 进程,自带 crashpad/mojo/沙箱机制,对企业 EDR/杀软的
+    // DLL 注入极其敏感 —— 实测(域机器)服务进程在应用层零错误的情况下周期性被 native 终结:
+    // 退出码 -36616 / 0x40010004(DBG_TERMINATE_PROCESS=被外部按调试器方式终结),死前必现
+    // crashpad not connected,且 Windows 事件查看器无 ID1000 崩溃记录(说明不是自身崩溃、
+    // 是被外部干净终结)。每次被杀触发下方自动重启+reload,把用户正在看的页面(如测试工作台
+    // 报告)刷回初始态。纯 Node 子进程没有这些敏感机制,对注入的耐受性好得多。
+    // native 模块 ABI 不变:ELECTRON_RUN_AS_NODE 与 utilityProcess 用的是同一个内嵌 Node,
+    // better-sqlite3 仍按 after-pack 重编译的 Electron ABI 正常加载。
+    const nodeChild = fork(serverPath, [], {
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+      cwd: standaloneDir,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    nodeChild.stdout?.on('data', makeLineHandler('[server]', false));
+    nodeChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    nodeChild.on('exit', (code) => handleExit(code));
+    child = nodeChild;
+  } else {
+    // macOS/Linux 维持 utilityProcess —— 不会在 macOS 多出一个 Dock 图标。
+    const utilChild = utilityProcess.fork(serverPath, [], {
+      env,
+      cwd: standaloneDir,
+      stdio: 'pipe',
+      serviceName: 'codepilot-server',
+    });
+    utilChild.stdout?.on('data', makeLineHandler('[server]', false));
+    utilChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    utilChild.on('exit', (code) => handleExit(code));
+    child = utilChild;
+  }
+
+  // 记录 pid 到固定 pidfile —— 供下次启动清理本次的残留进程(见 reapOrphanServer)。
+  // 两种 fork 都同步返回,pid 此时已可用。
+  if (child.pid) {
+    writeServerPidFile(child.pid);
+  }
+
+  return child;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Managed-account login helpers (electron/auth/* glue)
+//
+// These build on electron/auth/client.ts (which knows about the backend API)
+// and electron/auth/broker.ts (which knows about the local Next.js server)
+// to drive the boot sequence and produce the AuthSnapshot the renderer cares
+// about. Token never leaves main.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface AuthSnapshot {
+  authenticated: boolean;
+  offline: boolean;
+  me: { username: string; display_name: string; email?: string; plan?: string } | null;
+  managedConfigCount: number;
+}
+
+function buildAuthSnapshot(): AuthSnapshot {
+  return {
+    authenticated: !!currentMe || isOfflineMode,
+    offline: isOfflineMode,
+    me: currentMe
+      ? {
+          username: currentMe.username,
+          display_name: currentMe.display_name,
+          email: currentMe.email,
+          plan: currentMe.plan,
+        }
+      : null,
+    managedConfigCount,
+  };
+}
+
+/** Push the latest snapshot to the renderer. Safe to call before main window exists. */
+function broadcastAuthChange(): void {
+  const snapshot = buildAuthSnapshot();
+  try {
+    mainWindow?.webContents.send('auth:changed', snapshot);
+  } catch {
+    // window may have been torn down — ignore
+  }
+}
+
+/** Push ModelConfig[] to the embedded server so api_providers reflects reality. */
+async function syncManagedFromConfigs(configs: ModelConfig[]): Promise<void> {
+  const rows = configs.map((c) => modelConfigToManagedProviderRow(c));
+  try {
+    const result = await syncManagedProvidersToServer(rows);
+    managedConfigCount = configs.length;
+    logInfo('managed providers synced: upserted=', result.upserted, 'pruned=', result.pruned);
+  } catch (err) {
+    logError('failed to sync managed providers to server:', (err as Error).message);
+  }
+}
+
+/**
+ * Fetch the global Bailian image config (文生图凭证) and push it to the embedded
+ * server (writes the bailian_image_config settings row). Best-effort: a failure
+ * must not block the login/boot flow. The credential stays in main + the Next
+ * server — it never reaches the renderer, and it is NEVER written to
+ * api_providers, so the image model can't leak into the chat dropdown.
+ */
+async function refreshImageConfig(): Promise<void> {
+  try {
+    const img = await fetchImageConfig();
+    await syncImageConfigToServer(img);
+    logInfo('image config synced: model=', img.model, 'models=', img.models.length, 'hasKey=', !!img.apiKey);
+  } catch (err) {
+    logWarn('failed to refresh image config:', (err as Error).message);
+  }
+}
+
+/**
+ * Fetch the per-user cowork remote-sandbox config (server url + HMAC token,
+ * R5-5 账号下发) and push it to the embedded server (writes cowork_remote_url /
+ * cowork_remote_token(sealed)/ cowork_backend settings). Best-effort,同
+ * refreshImageConfig。404 = 未开通/后端未上线 → 跳过且**不清**既有配置(保
+ * dev 手写三键的联调后门;真正清空只发生在登出/401 的 purge)。
+ */
+async function refreshCoworkConfig(): Promise<void> {
+  try {
+    const cfg = await fetchCoworkConfig();
+    if (!cfg) return; // 404:未开通/未上线 — 不动现状
+    await syncCoworkConfigToServer(cfg);
+    logInfo('cowork config synced: url=', cfg.serverUrl, 'hasToken=', !!cfg.token);
+  } catch (err) {
+    logWarn('failed to refresh cowork config:', (err as Error).message);
+  }
+}
+
+/**
+ * Initial boot pass — runs once after the embedded server is ready.
+ *
+ * Behaviour matrix (also documented in docs/exec-plans/active/login-system.md):
+ *
+ *   token absent           → unauthenticated (no UI prompt)
+ *   probe 200              → fetchMe → registerDevice → getConfigs → sync → poller start
+ *   probe 401              → clear token + purge managed + push 'auth:changed'
+ *   probe network error    → load cached configs.json + me_json, offline mode
+ *
+ * Errors are caught and logged — boot failure must not crash the app.
+ */
+/**
+ * Boot pass with **mandatory** login enforcement.
+ *
+ * Resolves only after one of:
+ *   - cached token still works (online or offline) → fetch /me, register
+ *     device, sync configs, start poller
+ *   - user completes a fresh browser OAuth → post-login sequence ran inside
+ *     the auth:run-login-flow IPC handler, so this function just broadcasts
+ *     the resulting snapshot
+ *   - user dismisses the login window without authenticating → app.quit()
+ *     fires and the returned promise never resolves (the renderer will be
+ *     torn down anyway).
+ *
+ * Callers MUST await this before loading the main window URL so the
+ * user can't bypass the gate by interacting with a half-loaded UI.
+ */
+async function bootAccountState(): Promise<void> {
+  try {
+    const cached = await tryUseCachedToken();
+    if (!cached.alive) {
+      // STRICT LOGIN: no usable token → force the login window. allowSkip is
+      // false so the renderer-side "skip" button stays hidden, but we still
+      // treat 'skipped' as a quit signal defensively.
+      const outcome = await openLoginWindow({ allowSkip: false });
+      if (outcome !== 'success') {
+        logInfo('login window dismissed without success — quitting');
+        app.quit();
+        return;
+      }
+      // Login succeeded — the auth:run-login-flow IPC handler already kicked
+      // off postLoginSequence (fetchMe / registerDevice / getConfigs / start
+      // poller) in the background. Push whatever snapshot we have now;
+      // postLoginSequence will broadcast again when it finishes.
+      broadcastAuthChange();
+      return;
+    }
+
+    isOfflineMode = cached.offline;
+
+    if (!isOfflineMode) {
+      try {
+        currentMe = await fetchMe();
+        logInfo('fetched me:', currentMe.username);
+      } catch (e) {
+        logWarn('fetchMe failed at boot:', (e as Error).message);
+      }
+      try {
+        await registerDevice();
+      } catch (e) {
+        logWarn('registerDevice failed at boot:', (e as Error).message);
+      }
+    }
+
+    try {
+      const configs = await getConfigs({ force: true });
+      await syncManagedFromConfigs(configs);
+    } catch (e) {
+      logWarn('getConfigs failed at boot:', (e as Error).message);
+    }
+    // 办公会话账号隔离的事实源：必须先于 refreshCoworkConfig 推下去，否则本次启动
+    // 期间新建的办公会话会带着空归属落库（空归属按存量处理 = 对所有账号隐藏）。
+    await syncCurrentUserToServer(String(currentMe?.id || ''));
+    // 文生图凭证/办公沙箱配置下发：与 configs 并列，独立 try（失败不影响对话配置）。
+    await refreshImageConfig();
+    await refreshCoworkConfig();
+
+    if (!isOfflineMode) {
+      startBackgroundPolling({
+        onConfigsChanged: (configs) => {
+          void syncManagedFromConfigs(configs);
+          void refreshImageConfig();
+          void refreshCoworkConfig();
+          broadcastAuthChange();
+        },
+      });
+      // 测试用量：启动每日 10/16/20 定时上报 + 启动即触发一次（仅登录态生效）。
+      startTestUsageScheduler();
+      scheduleTestUsageUpload('boot');
+    }
+  } catch (e) {
+    logError('bootAccountState fatal error:', (e as Error).message);
+  } finally {
+    broadcastAuthChange();
+  }
+}
+
+/** Full post-login pass — invoked after a successful interactive login. */
+async function postLoginSequence(): Promise<void> {
+  isOfflineMode = false;
+  try {
+    currentMe = await fetchMe();
+  } catch (e) {
+    logWarn('postLogin fetchMe failed:', (e as Error).message);
+  }
+  try {
+    await registerDevice();
+  } catch (e) {
+    logWarn('postLogin registerDevice failed:', (e as Error).message);
+  }
+  try {
+    const configs = await getConfigs({ force: true });
+    await syncManagedFromConfigs(configs);
+  } catch (e) {
+    logWarn('postLogin getConfigs failed:', (e as Error).message);
+  }
+  // 先于 cowork 配置：新账号登录后建的办公会话必须立刻带上正确归属（见 bootAccountState）
+  await syncCurrentUserToServer(String(currentMe?.id || ''));
+  await refreshImageConfig();
+  await refreshCoworkConfig();
+  startBackgroundPolling({
+    onConfigsChanged: (configs) => {
+      void syncManagedFromConfigs(configs);
+      void refreshImageConfig();
+      void refreshCoworkConfig();
+      broadcastAuthChange();
+    },
+  });
+  // 测试用量：登录后启动定时器 + 触发一次上报。
+  startTestUsageScheduler();
+  scheduleTestUsageUpload('login');
+  broadcastAuthChange();
+}
+
+/** Full post-logout pass — invoked after the user explicitly logs out. */
+async function postLogoutSequence(): Promise<void> {
+  stopBackgroundPolling();
+  stopTestUsageScheduler();
+  try {
+    await purgeManagedProvidersOnServer();
+  } catch (e) {
+    logWarn('postLogout purge failed:', (e as Error).message);
+  }
+  try {
+    await purgeImageConfigOnServer();
+  } catch (e) {
+    logWarn('postLogout image-config purge failed:', (e as Error).message);
+  }
+  try {
+    await purgeCoworkConfigOnServer();
+  } catch (e) {
+    logWarn('postLogout cowork-config purge failed:', (e as Error).message);
+  }
+  // 清空归属标记：登出后办公会话对任何人都不可见,防止下一个登录的账号读到上一个
+  // 账号的办公对话(研发会话不受影响 —— 它绑定本地项目,不属于账号体系)。
+  await syncCurrentUserToServer('');
+  currentMe = null;
+  isOfflineMode = false;
+  managedConfigCount = 0;
+  broadcastAuthChange();
+}
+
+/**
+ * Re-gate the app after an explicit logout, matching the strict-login
+ * promise: the main window can never be visible while the user is
+ * unauthenticated.
+ *
+ * Flow:
+ *   1. Replace mainWindow's content with LOADING_HTML so the chat /
+ *      settings UI is hidden (the React tree is torn down — this is
+ *      desirable because Account/Provider sections no longer have
+ *      meaningful state anyway).
+ *   2. Open the login window with allowSkip=false. Anything other than
+ *      'success' triggers app.quit() — same gate as startup.
+ *   3. On success, reload the server URL so the user lands back in the
+ *      app with their freshly-issued token.
+ *
+ * Runs fire-and-forget from the auth:logout IPC handler so the IPC reply
+ * lands before we navigate the main window away.
+ */
+async function rePromptLoginAfterLogout(): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadURL(LOADING_HTML);
+  }
+  const outcome = await openLoginWindow({ allowSkip: false });
+  if (outcome !== 'success') {
+    logInfo('post-logout login dismissed — quitting');
+    app.quit();
+    return;
+  }
+  // Login succeeded → auth:run-login-flow handler already ran
+  // postLoginSequence in the background. Bring the user back to the
+  // main app.
+  if (mainWindow && !mainWindow.isDestroyed() && serverPort !== null) {
+    mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
+  }
+}
+
+function getIconPath(): string {
+  if (isDev) {
+    return path.join(process.cwd(), 'build', 'icon.png');
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.resourcesPath, 'icon.ico');
+  }
+  if (process.platform === 'linux') {
+    return path.join(process.resourcesPath, 'icon.png');
+  }
+  return path.join(process.resourcesPath, 'icon.icns');
+}
+
+/** Inline loading HTML shown while the server starts up */
+const LOADING_HTML = `data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0a0a; color: #a0a0a0;
+    -webkit-app-region: drag;
+  }
+  .container { text-align: center; }
+  .spinner {
+    width: 28px; height: 28px; margin: 0 auto 14px;
+    border: 2.5px solid rgba(255,255,255,0.1);
+    border-top-color: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  p { font-size: 13px; opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="spinner"></div>
+  <p>Starting AIMate...</p>
+</div>
+</body>
+</html>`)}`;
+
+function createWindow(url?: string) {
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
+    width: 1280,
+    height: 860,
+    minWidth: 1024,
+    minHeight: 600,
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  };
+
+  if (process.platform === 'darwin') {
+    windowOptions.titleBarStyle = 'hiddenInset';
+    windowOptions.vibrancy = 'sidebar';
+  } else if (process.platform === 'win32') {
+    windowOptions.titleBarStyle = 'hidden';
+    windowOptions.titleBarOverlay = {
+      color: '#00000000',
+      symbolColor: '#888888',
+      height: 44,
+    };
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
+
+  // 麦克风：renderer getUserMedia 需 session 放行 'media'。本应用只加载第一方可信内容
+  // （本地 Next server），故全放行 —— 无 handler 时本就等于全放行，显式设置不引入回归。
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(true));
+  mainWindow.webContents.session.setPermissionCheckHandler(() => true);
+
+  // External links: open in system default browser instead of Electron
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+      shell.openExternal(targetUrl);
+      return { action: 'deny' };
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    // Allow navigating within the app (localhost dev server)
+    const appOrigin = new URL(mainWindow!.webContents.getURL()).origin;
+    if (new URL(targetUrl).origin !== appOrigin) {
+      event.preventDefault();
+      shell.openExternal(targetUrl);
+    }
+  });
+
+  // Capture renderer-process console warnings/errors into the file log so
+  // UI-side failures (React error boundary, uncaught renderer exceptions
+  // surfaced as console errors) are diagnosable too.
+  mainWindow.webContents.on('console-message', (details: unknown, levelArg: unknown, messageArg: unknown, lineArg: unknown, sourceIdArg: unknown) => {
+    try {
+      // Electron 40 emits a single details object ({ message, level, lineNumber,
+      // sourceId }); older majors used positional args (still emitted but
+      // @deprecated). Read from whichever is present so renderer capture
+      // survives the eventual removal of the positional form.
+      const d = details && typeof details === 'object' ? (details as Record<string, unknown>) : undefined;
+      const message = d && 'message' in d ? d.message : messageArg;
+      const level = d && 'level' in d ? d.level : levelArg;
+      const lineNo = d && 'lineNumber' in d ? d.lineNumber : lineArg;
+      const sourceId = d && 'sourceId' in d ? d.sourceId : sourceIdArg;
+      // Keep only warnings/errors — drop verbose/info noise. Level is a string
+      // ('warning'|'error') in the new form, a number (2|3) in the old.
+      if (level === 'error' || level === 'warning' || level === 2 || level === 3) {
+        logRendererConsole(
+          String(message ?? ''),
+          typeof lineNo === 'number' ? lineNo : undefined,
+          typeof sourceId === 'string' ? sourceId : undefined,
+        );
+      }
+    } catch {
+      /* never let logging break the window */
+    }
+  });
+
+  // Terminal shells are owned by the renderer session that opened them. When
+  // that session goes away — renderer crash, or a full document reload/cross-doc
+  // navigation — the renderer drops its terminal UI but the backing shell
+  // processes keep running and keep piping output to a dead webContents. Reap
+  // them on every such transition so they don't accumulate. (Window-close is
+  // handled in the 'closed' handler below; on macOS that path matters most
+  // because closing the window does not quit the app.)
+  //
+  // 同时:渲染进程消失 = 用户看到的「整个白屏、点什么都没反应、只能退出重开」。
+  // 之前这里既不记日志也不恢复,主进程还活着照常轮询,于是日志上完全无痕 —— 排查
+  // 线上白屏时唯一能确认的就是"什么都没记下来"。现在把 reason/exitCode 落盘
+  // (crashed / oom / launch-failed / integrity-failure 直接指认根因),并自动重载窗口。
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    terminalManager.killAll();
+
+    const { reason, exitCode } = details;
+    console.error(`[renderer] 渲染进程消失 reason=${reason} exitCode=${exitCode}`);
+
+    // clean-exit 是主动销毁(关窗/换页)的正常路径,退出中或窗口已销毁同理 → 不自愈。
+    if (reason === 'clean-exit' || isQuitting) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const now = Date.now();
+    rendererReloadTimes = rendererReloadTimes.filter((t) => now - t < RENDERER_RELOAD_WINDOW_MS);
+    if (rendererReloadTimes.length >= MAX_RENDERER_RELOADS) {
+      console.error(
+        `[renderer] ${RENDERER_RELOAD_WINDOW_MS / 1000}s 内已自动恢复 ${rendererReloadTimes.length} 次,` +
+        `停止重载(确定性崩溃 —— 按上面的 reason 与 [metrics] 内存日志定位)`,
+      );
+      return;
+    }
+    rendererReloadTimes.push(now);
+    console.error(`[renderer] 自动重新加载窗口 (${rendererReloadTimes.length}/${MAX_RENDERER_RELOADS})…`);
+    setTimeout(() => {
+      if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+      try {
+        mainWindow.webContents.reload();
+      } catch (err) {
+        console.error(`[renderer] 重新加载失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, RENDERER_RELOAD_DELAY_MS);
+  });
+
+  // 主线程被长任务/死循环阻塞 —— 窗口停止重绘,用户看到的同样是"卡死/白屏",但
+  // 进程还活着,与上面的崩溃是两回事。只记录不干预:Electron 常能自行恢复,强行
+  // reload 会丢掉用户正在输入的内容。阻塞时长决定它是不是白屏的元凶。
+  let unresponsiveSince = 0;
+  mainWindow.on('unresponsive', () => {
+    unresponsiveSince = Date.now();
+    console.error('[renderer] 窗口无响应(主线程阻塞中)');
+  });
+  mainWindow.on('responsive', () => {
+    const blockedMs = unresponsiveSince ? Date.now() - unresponsiveSince : 0;
+    unresponsiveSince = 0;
+    console.warn(`[renderer] 窗口恢复响应(阻塞约 ${Math.round(blockedMs / 1000)}s)`);
+  });
+
+  // 页面加载失败 —— server 没起来/被杀/端口漂移时窗口会停在空白页。
+  // ERR_ABORTED(-3) 是导航被打断的正常情况(SPA 路由、连续 loadURL),不算故障。
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (errorCode === -3) return;
+    console.error(
+      `[renderer] 页面加载失败 code=${errorCode} ${errorDescription} ` +
+      `mainFrame=${isMainFrame} url=${validatedURL}`,
+    );
+  });
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    // Only a real document swap in the main frame orphans the terminals;
+    // in-page same-document SPA navigation (Next.js client routing) does not.
+    if (details.isMainFrame && !details.isSameDocument) {
+      terminalManager.killAll();
+    }
+  });
+
+  mainWindow.loadURL(url || LOADING_HTML);
+
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+
+  mainWindow.on('closed', () => {
+    // Renderer session ended — reap any shells it left running so they don't
+    // linger in the background (notably on macOS, where the app stays alive).
+    terminalManager.killAll();
+    mainWindow = null;
+  });
+}
+
+// [稳定性] 禁用 crashpad/crash-reporter。Windows 打包版内嵌 Next 服务(utilityProcess)里 spawn
+// 子进程(尤其经 cmd.exe)时，crashpad 在 utility 进程内「not connected」会参与把服务进程整体
+// native 崩溃(code -36616)。显式禁用崩溃上报，切断这条崩溃链，作为 platform.ts 去 shell:true
+// 之外的防御纵深。
+app.commandLine.appendSwitch('disable-crash-reporter');
+
+// GPU / utility 等非渲染子进程退出 —— 企业 Windows 上显卡驱动导致 GPU 进程反复
+// 崩溃是"窗口整片白"的另一条常见路径,而主进程对此毫无察觉。这里只记录不干预:
+// Chromium 自己会拉起新的 GPU 进程,连续失败后自动降级到软件渲染。日志里若出现
+// 连串 type=GPU,就该考虑 app.disableHardwareAcceleration() 兜底。
+// (crash-reporter 已禁用 ⇒ 没有 crashpad dump,这条日志是唯一的痕迹。)
+app.on('child-process-gone', (_event, details) => {
+  // GPU 进程的 serviceName 与 type 同为 'GPU',拼起来是冗余的 "GPU/GPU"。
+  const who = details.serviceName && details.serviceName !== details.type
+    ? `${details.type}/${details.serviceName}`
+    : details.type;
+  console.error(
+    `[child-process] ${who} 退出 reason=${details.reason} exitCode=${details.exitCode}` +
+    `${details.name ? ` name=${details.name}` : ''}`,
+  );
+});
+
+app.whenReady().then(async () => {
+  // Initialise file logging FIRST so every subsequent console.* in main — and
+  // the forked server's piped output we re-log below — is persisted to disk,
+  // and uncaught crashes are captured. Must run before the server fork.
+  initFileLogger();
+
+  // 内存采样紧跟日志之后开:从冷启动就开始记基线,白屏发生时才有完整的增长曲线可比。
+  startMetricsSampling();
+
+  // Windows toast notifications require the AppUserModelID to match the
+  // shortcut's AUMID (electron-builder NSIS writes appId there). Without this
+  // call `new Notification()` silently shows nothing on packaged Windows.
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.codepilot.app');
+  }
+
+  // Load user's full shell environment (API keys, PATH, etc.)
+  userShellEnv = loadUserShellEnv();
+
+  // Detect system proxy for Chinese users behind VPN (Clash, Surge, etc.)
+  resolvedProxyEnv = await resolveSystemProxy();
+
+  // Verify native module ABI compatibility before starting the server
+  checkNativeModuleABI();
+
+  // Initialise the credential-encryption master key BEFORE any server fork so
+  // its hex can be injected into the server env (startServer below). safeStorage
+  // is available now (app is ready). See electron/auth/secret-key.ts.
+  initMasterKey();
+  logSafeStorageStatus();
+
+  // Clear cache on version upgrade
+  const currentVersion = app.getVersion();
+  const versionFilePath = path.join(app.getPath('userData'), 'last-version.txt');
+  try {
+    const lastVersion = fs.existsSync(versionFilePath)
+      ? fs.readFileSync(versionFilePath, 'utf-8').trim()
+      : '';
+    if (lastVersion && lastVersion !== currentVersion) {
+      console.log(`Version changed from ${lastVersion} to ${currentVersion}, clearing cache...`);
+      await session.defaultSession.clearCache();
+      await session.defaultSession.clearStorageData({
+        storages: ['cachestorage', 'serviceworkers'],
+      });
+      console.log('Cache cleared successfully');
+    }
+    fs.writeFileSync(versionFilePath, currentVersion, 'utf-8');
+  } catch (err) {
+    console.warn('Failed to check/clear version cache:', err);
+  }
+
+  // Set macOS Dock icon
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = getIconPath();
+    app.dock.setIcon(nativeImage.createFromPath(iconPath));
+  }
+
+  // --- 技能市场（内部）：codeagent-server Skills 商店 BFF 的主进程代理 ---
+  // 登录 token 只在主进程,renderer 经 IPC 拿结构化结果。
+  // 方案见 docs/exec-plans/active/skills-store-internal.md。
+  registerSkillsStoreIpc(ipcMain);
+
+  // --- Retired GSD bundle: one-shot residue purge (fire-and-forget) ---
+  // No-op after the first successful run (marker at ~/.codepilot/.gsd-purged).
+  Promise.resolve()
+    .then(() => {
+      const result = purgeGsdResidue({ log: (msg) => console.log(msg) });
+      if (result.errors.length > 0) {
+        console.warn(
+          `[gsd-purge] completed with ${result.errors.length} error(s); will retry next launch:`,
+          result.errors.slice(0, 5).join('; '),
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[gsd-purge] threw:', err);
+    });
+
+  // --- Vendor-bundled AI_LabTest: sync (fire-and-forget, never blocks startup) ---
+  // First launch lays down the plugin dir DISABLED; the user enables it from
+  // Settings → Plugins (which also registers the Playwright MCP). When already
+  // enabled, this re-mirrors commands + skill and picks up version drift.
+  registerAilabIpc(ipcMain);
+  Promise.resolve()
+    .then(() => {
+      const status = installAilabBundle({
+        log: (msg) => console.log(msg),
+      });
+      if (status.lastError) {
+        console.warn('[ailab-installer] startup sync had error:', status.lastError);
+      } else {
+        console.log(
+          `[ailab-installer] startup sync OK (installed=${status.installed}, enabled=${status.enabled})`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[ailab-installer] startup sync threw:', err);
+    });
+
+  // --- Auto-inject skipWebFetchPreflight into ~/.claude/settings.json ---
+  // Pre-empts the common "Unable to verify if domain X is safe to fetch"
+  // error users behind enterprise networks / GFW see when Claude Code's
+  // WebFetch preflight call to api.anthropic.com is blocked. The function
+  // is synchronous, never throws, and respects user's explicit value (true
+  // OR false) if they've already set it. Wrapped in Promise.resolve() to
+  // match the other startup tasks' fire-and-forget pattern.
+  Promise.resolve()
+    .then(() => {
+      const result = ensureSkipWebFetchPreflight();
+      if (result.error) {
+        console.warn('[claude-settings] skipWebFetchPreflight ensure had error:', result.error);
+      } else if (result.updated) {
+        console.log(`[claude-settings] injected skipWebFetchPreflight: true into ${result.path}`);
+      } else if (result.skipped) {
+        // User already set it (true or false) — log nothing, this is the steady state
+      }
+    })
+    .catch((err) => {
+      console.error('[claude-settings] skipWebFetchPreflight ensure threw:', err);
+    });
+
+  // --- Install wizard IPC handlers ---
+
+  ipcMain.handle('install:check-prerequisites', async () => {
+    const expandedPath = getExpandedShellPath();
+    const execEnv = { ...sanitizedProcessEnv(), ...userShellEnv, PATH: expandedPath };
+
+    // Candidate paths — native first, then bun, then homebrew, then npm
+    const home = os.homedir();
+    const candidatePaths = process.platform === 'win32'
+      ? [
+          path.join(home, '.local', 'bin', 'claude.exe'),
+          path.join(home, '.local', 'bin', 'claude.cmd'),
+          path.join(home, '.claude', 'bin', 'claude.exe'),
+          path.join(home, '.claude', 'bin', 'claude.cmd'),
+          path.join(home, '.bun', 'bin', 'claude.exe'),
+          path.join(home, '.bun', 'bin', 'claude.cmd'),
+          path.join(process.env.APPDATA || '', 'npm', 'claude.cmd'),
+          path.join(process.env.LOCALAPPDATA || '', 'npm', 'claude.cmd'),
+        ].filter(p => p && !p.startsWith(path.sep))
+      : [
+          path.join(home, '.local', 'bin', 'claude'),
+          path.join(home, '.claude', 'bin', 'claude'),
+          path.join(home, '.bun', 'bin', 'claude'),
+          '/opt/homebrew/bin/claude',
+          '/usr/local/bin/claude',
+          path.join(home, '.npm-global', 'bin', 'claude'),
+        ];
+
+    function classifyPath(p: string): 'native' | 'homebrew' | 'npm' | 'bun' | 'unknown' {
+      const n = p.replace(/\\/g, '/');
+      if (n.includes('/.local/bin/') || n.includes('/.claude/bin/')) return 'native';
+      if (n.includes('/.bun/bin/') || n.includes('/.bun/install/')) return 'bun';
+      if (n.includes('/homebrew/') || n.includes('/Cellar/')) return 'homebrew';
+      if (n.includes('/npm')) return 'npm';
+      if (n === '/usr/local/bin/claude') {
+        try {
+          const real = fs.realpathSync(p);
+          if (real.includes('node_modules')) return 'npm';
+          if (real.includes('homebrew') || real.includes('Cellar')) return 'homebrew';
+          if (real.includes('.bun')) return 'bun';
+        } catch { /* ignore */ }
+        return 'unknown';
+      }
+      return 'unknown';
+    }
+
+    interface Detection { path: string; version: string | null; type: string }
+    const allInstalls: Detection[] = [];
+    const seenReal = new Set<string>();
+
+    for (const p of candidatePaths) {
+      try {
+        let realPath: string;
+        try { realPath = fs.realpathSync(p); } catch { realPath = p; }
+        if (seenReal.has(realPath)) continue;
+
+        const isWin = process.platform === 'win32';
+        const shell = isWin && /\.(cmd|bat)$/i.test(p);
+        const result = execFileSync(p, ['--version'], {
+          timeout: 5000, encoding: 'utf-8', env: execEnv, shell, stdio: 'pipe',
+        });
+        seenReal.add(realPath);
+        allInstalls.push({ path: p, version: result.trim() || null, type: classifyPath(p) });
+      } catch {
+        // not at this path
+      }
+    }
+
+    // Also scan PATH via which/where to catch bun, custom, or other non-standard installs
+    try {
+      const isWinPlatform = process.platform === 'win32';
+      const cmd = isWinPlatform ? 'where' : '/usr/bin/which';
+      const args = isWinPlatform ? ['claude'] : ['-a', 'claude']; // -a = show ALL matches
+      const whichResult = execFileSync(cmd, args, {
+        timeout: 3000, encoding: 'utf-8', env: execEnv,
+        shell: isWinPlatform, stdio: 'pipe',
+      });
+      for (const line of whichResult.trim().split(/\r?\n/)) {
+        const candidate = line.trim();
+        if (!candidate) continue;
+        // where 会把同目录下无扩展名的 claude 一并列出 —— 那是安装器留给 Git Bash 的
+        // POSIX sh 脚本，不是 PE。下面 execFileSync 对它走 shell:false 直接 CreateProcessW，
+        // Windows 会弹出无法捕获的系统模态框「此应用无法在你的电脑上运行」。
+        // 与 platform.ts:isSpawnableBinary() 同一道闸(此处为向导页触发点)。
+        if (isWinPlatform && !/\.(exe|cmd|bat|com)$/i.test(candidate)) continue;
+        try {
+          let realPath: string;
+          try { realPath = fs.realpathSync(candidate); } catch { realPath = candidate; }
+          if (seenReal.has(realPath)) continue;
+
+          const shell = isWinPlatform && /\.(cmd|bat)$/i.test(candidate);
+          const result = execFileSync(candidate, ['--version'], {
+            timeout: 5000, encoding: 'utf-8', env: execEnv, shell, stdio: 'pipe',
+          });
+          seenReal.add(realPath);
+          allInstalls.push({ path: candidate, version: result.trim() || null, type: classifyPath(candidate) });
+        } catch {
+          // invalid binary at this path
+        }
+      }
+    } catch {
+      // which/where failed
+    }
+
+    const primary = allInstalls[0];
+    const hasClaude = !!primary;
+
+    // On Windows, check for Git Bash (bash.exe) — this is what the SDK actually uses at runtime.
+    // Must match the detection strategy in platform.ts:findGitBash() to avoid false negatives.
+    let hasGit = true; // default true for non-Windows
+    if (process.platform === 'win32') {
+      hasGit = false;
+      // 1. User-specified env var
+      const envBash = process.env.CLAUDE_CODE_GIT_BASH_PATH || userShellEnv.CLAUDE_CODE_GIT_BASH_PATH;
+      if (envBash && fs.existsSync(envBash)) {
+        hasGit = true;
+      }
+      // 2. Common installation paths
+      if (!hasGit) {
+        const commonPaths = [
+          'C:\\Program Files\\Git\\bin\\bash.exe',
+          'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+        ];
+        if (commonPaths.some(p => fs.existsSync(p))) {
+          hasGit = true;
+        }
+      }
+      // 3. Derive from `where git`
+      if (!hasGit) {
+        try {
+          const whereResult = execFileSync('where', ['git'], {
+            timeout: 3000, encoding: 'utf-8', shell: true, stdio: 'pipe',
+          });
+          for (const line of whereResult.trim().split(/\r?\n/)) {
+            const gitExe = line.trim();
+            if (!gitExe) continue;
+            const gitDir = path.dirname(path.dirname(gitExe));
+            const bashPath = path.join(gitDir, 'bin', 'bash.exe');
+            if (fs.existsSync(bashPath)) {
+              hasGit = true;
+              break;
+            }
+          }
+        } catch {
+          // where git failed
+        }
+      }
+    }
+
+    return {
+      hasClaude,
+      claudeVersion: primary?.version,
+      claudePath: primary?.path,
+      claudeInstallType: primary?.type,
+      otherInstalls: allInstalls.slice(1),
+      hasGit,
+      platform: process.platform,
+    };
+  });
+
+  ipcMain.handle('install:start', () => {
+    if (installState.status === 'running') {
+      throw new Error('Installation is already running');
+    }
+
+    // On Windows, check if Git Bash is missing and prepend an install step
+    const isWin = process.platform === 'win32';
+    const needsGit = isWin && !findGitBashSync();
+
+    const steps: InstallStep[] = [
+      ...(needsGit ? [{ id: 'install-git', label: 'Installing Git for Windows', status: 'pending' as const }] : []),
+      { id: 'install-claude', label: 'Installing Claude Code (native)', status: 'pending' },
+      { id: 'verify', label: 'Verifying installation', status: 'pending' },
+    ];
+
+    installState = {
+      status: 'running',
+      currentStep: null,
+      steps,
+      logs: [],
+    };
+
+    const expandedPath = getExpandedShellPath();
+    const home = os.homedir();
+    const execEnv: Record<string, string> = {
+      ...userShellEnv,
+      ...sanitizedProcessEnv(),
+      ...userShellEnv,
+      PATH: expandedPath,
+    };
+
+    function sendProgress() {
+      mainWindow?.webContents.send('install:progress', installState);
+    }
+
+    function setStep(id: string, status: InstallStep['status'], error?: string) {
+      const step = installState.steps.find(s => s.id === id);
+      if (step) {
+        step.status = status;
+        step.error = error;
+      }
+      installState.currentStep = id;
+      sendProgress();
+    }
+
+    function addLog(line: string) {
+      installState.logs.push(line);
+      sendProgress();
+    }
+
+    // Run the installation sequence asynchronously
+    (async () => {
+      try {
+        // Step 0 (Windows only): Install Git for Windows if missing
+        if (needsGit) {
+          setStep('install-git', 'running');
+          addLog('Installing Git for Windows via winget...');
+
+          const gitSuccess = await new Promise<boolean>((resolve) => {
+            const child = spawn('winget', [
+              'install', 'Git.Git',
+              '--silent',
+              '--accept-package-agreements',
+              '--accept-source-agreements',
+            ], {
+              env: execEnv,
+              shell: true,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            installProcess = child;
+
+            child.stdout?.on('data', (data: Buffer) => {
+              for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+            });
+            child.stderr?.on('data', (data: Buffer) => {
+              for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+            });
+            child.on('error', (err) => { addLog(`Error: ${err.message}`); resolve(false); });
+            child.on('close', (code) => {
+              installProcess = null;
+              resolve(code === 0);
+            });
+          });
+
+          if (installState.status === 'cancelled') {
+            setStep('install-git', 'failed', 'Cancelled');
+            return;
+          }
+          if (!gitSuccess) {
+            // Non-fatal: skip Git install and continue with Claude.
+            // The user can install Git manually later.
+            addLog('winget not available or install failed. Skipping — please install Git for Windows manually from https://git-scm.com/downloads/win');
+            setStep('install-git', 'skipped', 'Auto-install skipped. Please install Git manually.');
+          } else {
+            addLog('Git for Windows installed successfully.');
+            setStep('install-git', 'success');
+          }
+        }
+
+        // Step 1: Install Claude Code via native installer
+        setStep('install-claude', 'running');
+
+        if (isWin) {
+          // Windows: download and run install.cmd
+          addLog('Downloading native installer for Windows...');
+
+          const installSuccess = await new Promise<boolean>((resolve) => {
+            // Download install.cmd to temp, then execute it
+            const tmpDir = os.tmpdir();
+            const installCmd = path.join(tmpDir, 'claude-install.cmd');
+
+            const downloadChild = spawn('curl', ['-fsSL', 'https://claude.ai/install.cmd', '-o', installCmd], {
+              env: execEnv,
+              shell: true,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            installProcess = downloadChild;
+
+            downloadChild.stderr?.on('data', (data: Buffer) => {
+              for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+            });
+
+            downloadChild.on('close', (dlCode) => {
+              if (dlCode !== 0) {
+                addLog('Failed to download installer.');
+                resolve(false);
+                return;
+              }
+
+              addLog('Running installer...');
+              const child = spawn(installCmd, [], {
+                env: execEnv,
+                shell: true,
+                stdio: ['ignore', 'pipe', 'pipe'],
+              });
+              installProcess = child;
+
+              child.stdout?.on('data', (data: Buffer) => {
+                for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+              });
+              child.stderr?.on('data', (data: Buffer) => {
+                for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+              });
+              child.on('error', (err) => { addLog(`Error: ${err.message}`); resolve(false); });
+              child.on('close', (code) => {
+                installProcess = null;
+                // Clean up temp file
+                try { fs.unlinkSync(installCmd); } catch { /* ignore */ }
+                resolve(code === 0);
+              });
+            });
+
+            downloadChild.on('error', (err) => {
+              addLog(`Download error: ${err.message}`);
+              resolve(false);
+            });
+          });
+
+          if (installState.status === 'cancelled') {
+            setStep('install-claude', 'failed', 'Cancelled');
+            return;
+          }
+          if (!installSuccess) {
+            setStep('install-claude', 'failed', 'Native installer failed. Check logs for details.');
+            installState.status = 'failed';
+            sendProgress();
+            return;
+          }
+        } else {
+          // macOS / Linux: curl | bash
+          addLog('Running: curl -fsSL https://claude.ai/install.sh | bash');
+
+          const installSuccess = await new Promise<boolean>((resolve) => {
+            const userShell = process.env.SHELL || '/bin/bash';
+            const child = spawn(userShell, ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], {
+              env: execEnv,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            installProcess = child;
+
+            child.stdout?.on('data', (data: Buffer) => {
+              for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+            });
+            child.stderr?.on('data', (data: Buffer) => {
+              for (const line of data.toString().split('\n').filter(Boolean)) addLog(line);
+            });
+            child.on('error', (err) => { addLog(`Error: ${err.message}`); resolve(false); });
+            child.on('close', (code) => {
+              installProcess = null;
+              if (code === 0) {
+                addLog('Native installer completed successfully.');
+                resolve(true);
+              } else if (installState.status === 'cancelled') {
+                addLog('Installation was cancelled.');
+                resolve(false);
+              } else {
+                addLog(`Installer exited with code ${code}`);
+                resolve(false);
+              }
+            });
+          });
+
+          if (installState.status === 'cancelled') {
+            setStep('install-claude', 'failed', 'Cancelled');
+            return;
+          }
+          if (!installSuccess) {
+            setStep('install-claude', 'failed', 'Native installer failed. Check logs for details.');
+            installState.status = 'failed';
+            sendProgress();
+            return;
+          }
+        }
+
+        setStep('install-claude', 'success');
+
+        // Step 2: Verify claude is available
+        setStep('verify', 'running');
+
+        // Native installer puts binary in ~/.local/bin/claude — add to PATH for verification
+        const verifyPath = `${path.join(home, '.local', 'bin')}${path.delimiter}${expandedPath}`;
+        const verifyEnv = { ...execEnv, PATH: verifyPath };
+
+        try {
+          const verifyOpts = isWin
+            ? { timeout: 5000, encoding: 'utf-8' as const, env: verifyEnv, shell: true, stdio: 'pipe' as const }
+            : { timeout: 5000, encoding: 'utf-8' as const, env: verifyEnv, stdio: 'pipe' as const };
+          const claudeResult = execFileSync('claude', ['--version'], verifyOpts);
+          addLog(`Claude Code installed: ${claudeResult.trim()}`);
+          setStep('verify', 'success');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          addLog(`Verification failed: ${msg}`);
+          setStep('verify', 'failed', 'Claude Code was installed but could not be verified.');
+          installState.status = 'failed';
+          sendProgress();
+          return;
+        }
+
+        installState.status = 'success';
+        installState.currentStep = null;
+        sendProgress();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addLog(`Unexpected error: ${msg}`);
+        installState.status = 'failed';
+        sendProgress();
+      }
+    })();
+  });
+
+  ipcMain.handle('install:cancel', () => {
+    if (installState.status !== 'running') {
+      return;
+    }
+
+    installState.status = 'cancelled';
+    installState.logs.push('Cancelling installation...');
+
+    if (installProcess) {
+      const pid = installProcess.pid;
+      try {
+        if (process.platform === 'win32' && pid) {
+          // Windows: kill entire process tree (shell: true spawns cmd.exe which
+          // spawns npm/winget — child.kill() only kills the shell, not the tree)
+          spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+        } else {
+          installProcess.kill();
+        }
+      } catch {
+        // already dead
+      }
+      installProcess = null;
+      installState.logs.push('Installation process terminated.');
+    }
+
+    mainWindow?.webContents.send('install:progress', installState);
+  });
+
+  ipcMain.handle('install:get-logs', () => {
+    return installState.logs;
+  });
+
+  // Install Git for Windows via winget (called from ConnectionStatus dialog)
+  ipcMain.handle('install:git', async () => {
+    if (process.platform !== 'win32') {
+      return { success: false, error: 'Git installation is only needed on Windows' };
+    }
+    try {
+      const expandedPath = getExpandedShellPath();
+      const execEnv = { ...sanitizedProcessEnv(), ...userShellEnv, PATH: expandedPath };
+
+      const result = await new Promise<{ success: boolean; output: string }>((resolve) => {
+        let output = '';
+        const child = spawn('winget', [
+          'install', 'Git.Git',
+          '--silent',
+          '--accept-package-agreements',
+          '--accept-source-agreements',
+        ], {
+          env: execEnv,
+          shell: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        child.stdout?.on('data', (data: Buffer) => { output += data.toString(); });
+        child.stderr?.on('data', (data: Buffer) => { output += data.toString(); });
+        child.on('error', (err) => { resolve({ success: false, output: err.message }); });
+        child.on('close', (code) => { resolve({ success: code === 0, output: output.trim() }); });
+      });
+
+      return result;
+    } catch (err) {
+      return { success: false, output: '', error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // --- End install wizard IPC handlers ---
+
+  // Open a folder in the system file manager (Finder / Explorer)
+  ipcMain.handle('shell:open-path', async (_event: Electron.IpcMainInvokeEvent, folderPath: string) => {
+    return shell.openPath(folderPath);
+  });
+
+  // Reveal a file/folder in the system file manager, selecting it inside its
+  // parent folder (Finder on macOS, Explorer on Windows). Cross-platform via
+  // Electron's shell.showItemInFolder — the renderer prefers this over the
+  // /api/files/reveal exec fallback when running inside the packaged app.
+  ipcMain.handle('shell:show-item-in-folder', async (_event: Electron.IpcMainInvokeEvent, itemPath: string) => {
+    shell.showItemInFolder(itemPath);
+  });
+
+  // Open the application log directory (so users can find & share logs when
+  // reporting a problem). Returns '' on success, else an error string.
+  ipcMain.handle('logs:open-folder', async () => openLogsFolder());
+  ipcMain.handle('logs:get-path', async () => getLogDir());
+
+  // Bridge status IPC
+  ipcMain.handle('bridge:is-active', async () => {
+    return isBridgeActive();
+  });
+
+  // Native folder picker dialog
+  ipcMain.handle('dialog:open-folder', async (_event, options?: { defaultPath?: string; title?: string }) => {
+    if (!mainWindow) return { canceled: true, filePaths: [] };
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: options?.title || 'Select a project folder',
+      defaultPath: options?.defaultPath || undefined,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return { canceled: result.canceled, filePaths: result.filePaths };
+  });
+
+  // Test Accounts — 获取登录态 capture. Opens an isolated window (BaseWindow +
+  // toolbar/site WebContentsView), lets the user log in, then the in-window toolbar
+  // writes a Playwright storageState file into the AI_LabTest workspace for replay.
+  // See electron/test-auth-capture/capture-window.ts.
+  //
+  // done/cancelled are pushed to the settings page so its "captured" badge updates
+  // without the user switching back. Notifier reads the live mainWindow each call.
+  registerCaptureNotifier((channel, payload) => {
+    mainWindow?.webContents.send(channel, payload);
+  });
+  ipcMain.handle('test-auth-capture:start', (_e, params: {
+    frontendBaseUrl: string;
+    username?: string;
+    password?: string;
+    projectRoot: string;
+    env: string;
+    accountKey: string;
+    systemLabel?: string;
+  }) => startCapture(params));
+  ipcMain.handle('test-auth-capture:cancel', () => cancelCapture());
+  ipcMain.handle('test-auth-capture:status', (_e, params: { projectRoot: string; env: string; accountKey: string }) => getCaptureStatus(params));
+  ipcMain.handle('test-auth-capture:clear', (_e, params: { projectRoot: string; env: string; accountKey: string }) => clearCaptured(params));
+  // 工具条「登录完成」：就地抓取写盘（用 start 时存的目标），成功后由 capture-window
+  // 通知设置页并关窗；抓到空则返回失败、不关窗（工具条红字提示）。
+  ipcMain.handle('test-auth-capture:toolbar-finish', () => finishCaptureSelf());
+  // 工具条「取消」：关窗，由 'closed' 触发 cancelled 通知给设置页。
+  ipcMain.handle('test-auth-capture:toolbar-cancel', () => cancelCaptureByUser());
+
+  // --- Widget export IPC handler ---
+  // Uses an isolated BrowserWindow for secure, high-fidelity widget screenshot.
+  // The window is hidden, has its own session partition, no preload, no IPC access.
+  ipcMain.handle('widget:export-png', async (_event, { html, width }: { html: string; width: number }) => {
+    const exportWindow = new BrowserWindow({
+      show: false,
+      width,
+      height: 2000,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        partition: `export-${Date.now()}`, // isolated session, destroyed with window
+        // No preload — no IPC access from this window
+      },
+    });
+
+    // Block all navigation and window.open — prevents data exfiltration via top-level nav
+    exportWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    exportWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+    try {
+      // Load the widget HTML directly
+      await exportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+      // Wait for widget scripts to finish (scriptsReady signal or timeout)
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const done = () => { if (!resolved) { resolved = true; resolve(); } };
+        // Listen for console message from widget:scriptsReady
+        exportWindow.webContents.on('console-message', (_e, _level, message) => {
+          if (message === '__scriptsReady__') done();
+        });
+        // Fallback timeout for widgets without CDN/scripts
+        setTimeout(done, 6000);
+      });
+
+      // Extra delay for final paint
+      await new Promise(r => setTimeout(r, 300));
+
+      // Get actual content height and resize
+      const contentHeight = await exportWindow.webContents.executeJavaScript('document.body.scrollHeight');
+      exportWindow.setSize(width, Math.min(contentHeight + 20, 4000));
+      await new Promise(r => setTimeout(r, 100));
+
+      // Capture using Chromium's native screenshot
+      const image = await exportWindow.webContents.capturePage();
+      return image.toPNG().toString('base64');
+    } finally {
+      exportWindow.destroy();
+    }
+  });
+
+  // --- Artifact long-shot export (Phase 3) ---
+  // Captures an arbitrary HTML source as a single full-page PNG, using
+  // Chromium's CDP captureBeyondViewport so we can exceed the viewport
+  // height without manual stitching. Runs in an isolated hidden
+  // BrowserWindow with its own session partition (mirrors
+  // widget:export-png's security envelope).
+  //
+  // Module-level export lock serializes concurrent calls; capturePage +
+  // debugger.attach don't play nicely with a second export starting on
+  // the same machine before the first finishes.
+  let exportLongShotBusy = false;
+
+  ipcMain.handle('artifact:export-long-shot', async (_event, params: {
+    html: string;
+    width: number;
+    pixelRatio?: number;
+    outPath?: string;
+    maxHeightPx?: number;
+    timeoutMs?: number;
+  }) => {
+    if (exportLongShotBusy) {
+      return { error: 'busy' as const };
+    }
+    exportLongShotBusy = true;
+
+    const {
+      html,
+      width,
+      pixelRatio = 2,
+      outPath,
+      maxHeightPx = 50000,
+      timeoutMs = 30000,
+    } = params;
+
+    const exportWindow = new BrowserWindow({
+      show: false,
+      width,
+      height: 2000,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        partition: `artifact-export-${Date.now()}`,
+      },
+    });
+    exportWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+    exportWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    const deadline = new Promise<'timeout'>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+
+    try {
+      await exportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+      // Give the document a chance to finish layout + image loading. We
+      // race a scriptsReady console signal against a fixed ceiling.
+      const readyRace = Promise.race([
+        new Promise<'ready'>((resolve) => {
+          exportWindow.webContents.on('console-message', (_e, _level, message) => {
+            if (message === '__scriptsReady__') resolve('ready');
+          });
+          // Unconditional floor — even if the page never emits scriptsReady,
+          // we still resolve after 3s so simple HTML artifacts render.
+          setTimeout(() => resolve('ready'), 3000);
+        }),
+        deadline,
+      ]);
+      const readyResult = await readyRace;
+      if (readyResult === 'timeout') {
+        return { error: 'timeout' as const };
+      }
+      // Small extra delay so image repaints settle before we measure height.
+      await new Promise((r) => setTimeout(r, 200));
+
+      const contentHeight: number = await exportWindow.webContents.executeJavaScript(
+        'document.body.scrollHeight',
+      );
+      if (contentHeight > maxHeightPx) {
+        return {
+          error: 'canvas_limit' as const,
+          meta: { contentHeight, maxHeightPx },
+        };
+      }
+
+      // Use CDP Page.captureScreenshot with captureBeyondViewport so we
+      // don't need to size the window up to the content or stitch segments.
+      // debugger.attach is independent of DevTools; the export window
+      // itself is hidden so DevTools never attach to it.
+      try {
+        exportWindow.webContents.debugger.attach('1.3');
+      } catch (err) {
+        return {
+          error: 'debugger_busy' as const,
+          meta: { detail: String(err) },
+        };
+      }
+
+      let pngBase64: string;
+      try {
+        const result = await exportWindow.webContents.debugger.sendCommand(
+          'Page.captureScreenshot',
+          {
+            format: 'png',
+            captureBeyondViewport: true,
+            // Force device-pixel ratio so the produced image matches the
+            // user's monitor scale — without this, retina users get a
+            // half-resolution PNG.
+            // Note: CDP doesn't take pixelRatio directly; we size via
+            // clip + deviceScaleFactor below if needed.
+          },
+        );
+        pngBase64 = (result as { data: string }).data;
+      } finally {
+        try {
+          exportWindow.webContents.debugger.detach();
+        } catch {
+          // Detach failures are harmless — the window destroy below
+          // tears everything down regardless.
+        }
+      }
+
+      if (outPath) {
+        const fs = await import('fs/promises');
+        const buf = Buffer.from(pngBase64, 'base64');
+        await fs.writeFile(outPath, buf);
+        return { path: outPath, bytes: buf.length };
+      }
+      return { base64: pngBase64, bytes: Buffer.from(pngBase64, 'base64').length };
+    } catch (err) {
+      return {
+        error: 'oom' as const,
+        meta: { detail: err instanceof Error ? err.message : String(err) },
+      };
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      exportWindow.destroy();
+      exportLongShotBusy = false;
+      // Unused here but kept to signal we didn't forget the pixelRatio
+      // param — Phase 3 follow-up may wire it via deviceScaleFactor emu.
+      void pixelRatio;
+    }
+  });
+
+  // --- Terminal IPC handlers ---
+  terminalManager.setOnData((id, data) => {
+    mainWindow?.webContents.send('terminal:data', { id, data });
+  });
+
+  terminalManager.setOnExit((id, code) => {
+    mainWindow?.webContents.send('terminal:exit', { id, code });
+  });
+
+  ipcMain.handle('terminal:create', async (_event, opts: { id: string; cwd: string; cols: number; rows: number }) => {
+    terminalManager.create(opts.id, {
+      cwd: opts.cwd,
+      cols: opts.cols,
+      rows: opts.rows,
+      env: userShellEnv,
+    });
+  });
+
+  ipcMain.on('terminal:write', (_event, data: { id: string; data: string }) => {
+    terminalManager.write(data.id, data.data);
+  });
+
+  ipcMain.handle('terminal:resize', async (_event, data: { id: string; cols: number; rows: number }) => {
+    terminalManager.resize(data.id, data.cols, data.rows);
+  });
+
+  ipcMain.handle('terminal:kill', async (_event, id: string) => {
+    terminalManager.kill(id);
+  });
+
+  // --- End terminal IPC handlers ---
+
+  // ===== 语音转文字（百炼实时 ASR）IPC =====
+  let asrSession: RealtimeAsrSession | null = null;
+
+  // macOS 需要系统级麦克风授权（TCC）；Win/Linux 直接放行。
+  const ensureMicPermission = async (): Promise<boolean> => {
+    if (process.platform !== 'darwin') return true;
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status === 'granted') return true;
+    return systemPreferences.askForMediaAccess('microphone');
+  };
+
+  ipcMain.handle('asr:request-mic-permission', async () => {
+    try {
+      return { granted: await ensureMicPermission() };
+    } catch (e) {
+      return { granted: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('asr:start', async () => {
+    if (asrSession) { asrSession.stop(); asrSession = null; }
+
+    const sendTranscript = (p: unknown) => mainWindow?.webContents.send('asr:transcript', p);
+    const sendState = (state: string) => mainWindow?.webContents.send('asr:state', { state });
+    const sendError = (code: string, message: string) => mainWindow?.webContents.send('asr:error', { code, message });
+
+    // 开一个会话，并把「是否成功进入 listening」变成可 await 的结果（用于 401 重试）。
+    const attempt = (cfg: AsrConfig) =>
+      new Promise<{ ok: true } | { ok: false; status?: number; error: string }>((resolve) => {
+        let settled = false;
+        const session = new RealtimeAsrSession(cfg, {
+          onPartial: (text, stash) => sendTranscript({ kind: 'partial', text, stash }),
+          onFinal: (transcript) => sendTranscript({ kind: 'final', transcript }),
+          onState: (s) => {
+            sendState(s);
+            if (s === 'listening' && !settled) { settled = true; resolve({ ok: true }); }
+            if (s === 'closed' && !settled) { settled = true; resolve({ ok: false, error: 'closed before ready' }); }
+          },
+          onError: (code, message, httpStatus) => {
+            if (!settled) { settled = true; resolve({ ok: false, status: httpStatus, error: `${code}: ${message}` }); }
+            else sendError(code, message);
+          },
+        }, 'zh');
+        asrSession = session;
+        session.start();
+      });
+
+    try {
+      let cfg = await getAsrConfig();
+      let r = await attempt(cfg);
+      if (!r.ok && r.status === 401) { // 临时 token 失效 → 清缓存换新、重试一次
+        invalidateAsrToken();
+        cfg = await getAsrConfig();
+        r = await attempt(cfg);
+      }
+      if (!r.ok) { asrSession?.stop(); asrSession = null; return { ok: false as const, status: r.status, error: r.error }; }
+      return { ok: true as const };
+    } catch (e) {
+      asrSession?.stop(); asrSession = null;
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  // 高频音频帧：fire-and-forget，仿 terminal:write
+  ipcMain.on('asr:audio', (_event, chunk: ArrayBuffer) => {
+    if (!asrSession) return;
+    asrSession.appendAudio(Buffer.from(chunk));
+  });
+
+  ipcMain.handle('asr:stop', async () => {
+    asrSession?.stop();
+    asrSession = null;
+    return { ok: true };
+  });
+
+  // --- Notification IPC handler ---
+  // taggedNotifications: dedupe map for notifications that carry a `tag`
+  // (e.g. turn-completion `turn-<sessionId>`) — re-showing the same tag
+  // replaces the previous banner, and notification:close can dismiss it when
+  // the user returns to the session on their own. Mirrors Claude Desktop's
+  // official NotificationService tag behaviour.
+  const taggedNotifications = new Map<string, Electron.Notification>();
+  ipcMain.handle('notification:show', async (_event, options: {
+    title: string;
+    body: string;
+    tag?: string;
+    onClick?: { type: string; payload: string };
+  }) => {
+    try {
+      if (options.tag) {
+        taggedNotifications.get(options.tag)?.close();
+        taggedNotifications.delete(options.tag);
+      }
+      const notification = new Notification({
+        title: options.title,
+        body: options.body || '',
+      });
+      if (options.onClick) {
+        notification.on('click', () => {
+          // Diagnostic breadcrumb — persisted by the file logger so a broken
+          // click-to-navigate chain is attributable (main got the click? sent IPC?).
+          console.log('[notification] click received', { tag: options.tag ?? '', type: options.onClick?.type ?? '' });
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            // macOS: show()/focus() alone do NOT reliably deminiaturize a
+            // window minimized to the Dock — restore() first.
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('notification:click', options.onClick);
+          } else {
+            console.warn('[notification] click: mainWindow unavailable, cannot navigate');
+          }
+        });
+      }
+      if (options.tag) {
+        const tag = options.tag;
+        taggedNotifications.set(tag, notification);
+        notification.on('close', () => {
+          if (taggedNotifications.get(tag) === notification) taggedNotifications.delete(tag);
+        });
+        notification.on('click', () => {
+          if (taggedNotifications.get(tag) === notification) taggedNotifications.delete(tag);
+        });
+      }
+      notification.show();
+      // Ask for the user's attention while the window is in the background —
+      // official parity: macOS bounces the dock icon once, Windows/Linux
+      // flashes the taskbar entry until the window regains focus.
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+        if (process.platform === 'darwin') {
+          app.dock?.bounce('informational');
+        } else {
+          mainWindow.flashFrame(true);
+          mainWindow.once('focus', () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(false);
+          });
+        }
+      }
+      return true;
+    } catch (err) {
+      console.error('[notification] Failed to show:', err);
+      return false;
+    }
+  });
+
+  // Close a tagged notification (no-op for unknown tags).
+  ipcMain.handle('notification:close', async (_event, tag: string) => {
+    const existing = taggedNotifications.get(tag);
+    if (existing) {
+      existing.close();
+      taggedNotifications.delete(tag);
+    }
+    return true;
+  });
+
+  // Proxy resolution IPC — allows renderer/API routes to query system proxy
+  ipcMain.handle('proxy:resolve', async (_event, url: string) => {
+    try {
+      return await session.defaultSession.resolveProxy(url);
+    } catch {
+      return 'DIRECT';
+    }
+  });
+
+  // ── Managed-account login IPC handlers ─────────────────────────────────
+  // Two audiences:
+  //   1. The dedicated login BrowserWindow (handlers prefixed run-/skip-)
+  //   2. The main renderer (get-state / trigger-login / logout / etc.)
+
+  // Login window: "Login in browser" button. Drives the full OAuth dance,
+  // saves the token, then runs the post-login sequence.
+  ipcMain.handle('auth:run-login-flow', async () => {
+    try {
+      await loginViaBrowser();
+      // Token already on disk; run me/devices/configs in the background so
+      // the login window can close right away.
+      void postLoginSequence();
+      notifyLoginSuccess();
+      return { ok: true as const };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logWarn('auth:run-login-flow failed:', msg);
+      return { ok: false as const, error: msg };
+    }
+  });
+
+  // Login window: "Skip" link. Only meaningful when the window was opened
+  // with allowSkip=true (first-run flow). Closes the login window and lets
+  // the user fall back to BYOK.
+  ipcMain.handle('auth:skip-login', () => {
+    notifyLoginSkip();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle('auth:get-state', () => buildAuthSnapshot());
+
+  // Main window: user clicked "Login account" anywhere. Open the login
+  // window (without the skip link — they chose to log in explicitly).
+  ipcMain.handle('auth:trigger-login', async () => {
+    try {
+      if (isLoginWindowOpen()) {
+        focusLoginWindow();
+        return { ok: true as const, outcome: 'success' as const };
+      }
+      const outcome = await openLoginWindow({ allowSkip: false });
+      return { ok: outcome === 'success' || outcome === 'skipped' || outcome === 'cancelled', outcome };
+    } catch (e) {
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('auth:logout', async () => {
+    try {
+      await anlLogout();
+    } catch (e) {
+      logWarn('anlLogout threw (continuing):', (e as Error).message);
+    }
+    await postLogoutSequence();
+    // Re-gate the app: hide the main UI and force a fresh login (or quit
+    // if the user dismisses). Fire-and-forget so the IPC reply lands
+    // before the main window navigates away.
+    void rePromptLoginAfterLogout();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle('auth:refresh-configs', async () => {
+    try {
+      const configs = await getConfigs({ force: true });
+      await syncManagedFromConfigs(configs);
+      // 手动「刷新配置」按钮同时刷新文生图凭证与办公沙箱配置；失败不阻断对话配置刷新结果。
+      await refreshImageConfig();
+      await refreshCoworkConfig();
+      broadcastAuthChange();
+      return { ok: true as const, count: configs.length };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false as const, error: msg };
+    }
+  });
+
+  ipcMain.handle('auth:probe', async () => {
+    const result = await tryUseCachedToken();
+    if (!result.alive) {
+      // Token gone or rejected — clear local state to match.
+      clearAuthState();
+      currentMe = null;
+      isOfflineMode = false;
+      try {
+        await purgeManagedProvidersOnServer();
+      } catch { /* ignore */ }
+      try {
+        await purgeImageConfigOnServer();
+      } catch { /* ignore */ }
+      try {
+        await purgeCoworkConfigOnServer();
+      } catch { /* ignore */ }
+      // token 失效等同登出:清归属,办公会话立即不可见(见 postLogoutSequence)
+      await syncCurrentUserToServer('');
+      managedConfigCount = 0;
+      broadcastAuthChange();
+    } else {
+      isOfflineMode = result.offline;
+      broadcastAuthChange();
+    }
+    return result;
+  });
+
+  // Usage quota — fetched on demand when the user opens the account menu.
+  // Errors carry status so the renderer can show 409 (not provisioned) /
+  // 503 (gateway down) / 401 / network distinctly. Token never leaves main.
+  ipcMain.handle('auth:get-usage', async () => {
+    try {
+      const usage = await fetchUsage();
+      return { ok: true as const, usage };
+    } catch (e) {
+      if (e instanceof HttpError) return { ok: false as const, status: e.status, error: e.message };
+      if (e instanceof AuthExpiredError) return { ok: false as const, status: 401, error: e.message };
+      if (e instanceof NetworkError) return { ok: false as const, kind: 'network' as const, error: e.message };
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  // 问题反馈：设置页「问题反馈」上报。走主进程的原因 — 登录 token 与
+  // main.log 都只在主进程（token 绝不下发 renderer）。日志只取当前
+  // main.log（写入时已经过 scrubSecrets 脱敏，≤5MB），不含轮转旧档。
+  // 身份不上送 — 服务端以 JWT claims 为准。契约见
+  // docs/exec-plans/active/bug-report-feedback.md。
+  ipcMain.handle('feedback:submit', async (
+    _event,
+    payload: { message?: unknown; includeLog?: unknown; images?: unknown },
+  ) => {
+    const message = normalizeFeedbackMessage(payload?.message);
+    if (!message) return { ok: false as const, error: 'invalid-message' as const };
+    const token = loadToken();
+    if (!token) return { ok: false as const, error: 'not-logged-in' as const };
+
+    let logBytes: Uint8Array | null = null;
+    if (payload?.includeLog === true) {
+      try {
+        logBytes = fs.readFileSync(path.join(getLogDir(), 'main.log'));
+      } catch {
+        logBytes = null; // 日志缺失不阻断上报，仅不附带
+      }
+    }
+
+    // 截图：renderer 已按张数/大小/类型筛过一遍，这里再收一次口 —— IPC 是
+    // 可被绕过的边界，主进程不能把 renderer 的入参当已验证数据。真正的终审
+    // 仍在服务端（魔术字节嗅探），这里只是不把明显不合规的东西发出去。
+    const rawImages = Array.isArray(payload?.images) ? payload.images : [];
+    const images: FeedbackImageInput[] = [];
+    for (const raw of rawImages.slice(0, FEEDBACK_MAX_IMAGES)) {
+      const item = raw as Partial<FeedbackImageInput> | null;
+      if (!item || typeof item.type !== 'string' || !isAllowedFeedbackImage(item.type)) continue;
+      const buf = item.data;
+      const bytes =
+        buf instanceof Uint8Array ? buf : buf instanceof ArrayBuffer ? new Uint8Array(buf) : null;
+      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > FEEDBACK_IMAGE_MAX_BYTES) continue;
+      images.push({ name: typeof item.name === 'string' ? item.name : 'screenshot', type: item.type, data: bytes });
+    }
+
+    const form = buildFeedbackForm({
+      message,
+      env: {
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        osVersion: process.getSystemVersion(),
+      },
+      logBytes,
+      images,
+    });
+    const result = await postFeedback({ baseUrl: getBackendBase(), token, form });
+    if (result.ok) {
+      logInfo(
+        '[feedback] submitted', result.id ?? '',
+        logBytes ? `log=${logBytes.byteLength}B` : 'no-log',
+        `images=${images.length}`,
+      );
+    } else {
+      logWarn('[feedback] submit failed:', result.error, result.status ?? '');
+    }
+    return result;
+  });
+
+  // 测试用量上报 · renderer 触发源（打开测试模块看到项目列表页时）。仅转调去抖入口 ——
+  // 未登录 / 去抖 60s / 距上次成功 5min 的门都在 scheduleTestUsageUpload→runUpload 内，
+  // 这里不做判断、也绝不阻塞。fire-and-forget：renderer 侧 void 调用，忽略返回。
+  ipcMain.handle('auth:upload-test-usage', () => {
+    scheduleTestUsageUpload('panel-open');
+    return { ok: true as const };
+  });
+
+  // Native auto-updater (research-platform V2): register renderer IPC and wire
+  // to the main window. The first check is renderer-triggered (useUpdateChecker
+  // on mount, so the onStatus listener is registered before any result is
+  // pushed); a periodic background re-check runs every 8h. Check-only — the
+  // actual download is user-initiated from the update dialog.
+  registerUpdaterIpc();
+  initUpdater(() => mainWindow);
+
+  // Renderer-initiated app quit — used by the forced-upgrade ("必须升级") dialog's
+  // "退出应用" button, the only escape when must_upgrade blocks the UI.
+  ipcMain.handle('app:quit', () => {
+    app.quit();
+  });
+
+  try {
+    let port: number;
+
+    if (isDev) {
+      const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : NaN;
+      port = Number.isNaN(envPort) ? 3000 : envPort;
+      console.log(`Dev mode: connecting to http://127.0.0.1:${port}`);
+      serverPort = port;
+      // Strict-login flow: open the main window with LOADING_HTML only.
+      // The real server URL is loaded AFTER bootAccountState succeeds so
+      // the user can never interact with the app while unauthenticated.
+      createWindow();
+    } else {
+      // Show window immediately with loading screen so user sees progress
+      // even if port acquisition takes a moment.
+      createWindow();
+
+      // startServerOnStablePort actually binds the subprocess on each
+      // candidate port and advances on EADDRINUSE — closing the TOCTOU
+      // race window from the previous "probe-then-release" approach.
+      port = await startServerOnStablePort();
+      serverPort = port;
+      console.log('Server is ready');
+      // NOTE: do NOT load the server URL into mainWindow yet. We must gate
+      // the main UI behind a successful login (see below).
+    }
+
+    // Managed-account login: wire the broker, then BLOCK until the user has
+    // a valid session. If they dismiss the login window we quit before any
+    // chat UI is ever shown. Renderer subscribes to 'auth:changed' for the
+    // snapshot after we load the main URL below.
+    if (serverPort !== null) {
+      setBrokerServerPort(serverPort);
+      await bootAccountState();
+      // If bootAccountState chose to quit (login dismissed), the app is
+      // already shutting down — bail out before loading the main window.
+      if (!app.isReady() || !mainWindow) {
+        return;
+      }
+    }
+
+    // Auth gate passed (or the broker wasn't wired for some reason).
+    // Now load the real server URL into the main window.
+    if (mainWindow && serverPort !== null) {
+      mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
+    }
+
+    // Bridge auto-start lives behind the same gate so an unauthenticated
+    // start can't pre-arm remote channels. Only relevant in packaged mode
+    // (dev mode delegates bridge boot to the user-run server).
+    if (!isDev && serverPort !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const http = require('http');
+      const autoStartData = JSON.stringify({ action: 'auto-start' });
+      const autoStartReq = http.request({
+        hostname: '127.0.0.1',
+        port: serverPort,
+        path: '/api/bridge',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(autoStartData),
+        },
+      }, () => {});
+      autoStartReq.on('error', () => {});
+      autoStartReq.write(autoStartData);
+      autoStartReq.end();
+    }
+
+  } catch (err) {
+    console.error('Failed to start:', err);
+    dialog.showErrorBox(
+      'AIMate - Failed to Start',
+      `The internal server could not start.\n\n${err instanceof Error ? err.message : String(err)}\n\nPlease try restarting the application.`
+    );
+    app.quit();
+  }
+});
+
+app.on('window-all-closed', async () => {
+  // If bridge is active, keep the server running and show a tray icon
+  const bridgeActive = await isBridgeActive();
+  if (bridgeActive) {
+    console.log('Bridge is active — keeping server alive in background with tray icon');
+    createTray();
+    // Start background notification polling since no renderer will be available
+    startBgNotifyPoll();
+    return;
+  }
+
+  destroyTray();
+  await killServer();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', async () => {
+  // If tray is active (bridge background mode), destroy it when user re-opens
+  destroyTray();
+
+  if (BrowserWindow.getAllWindows().length === 0) {
+    try {
+      if (!isDev && !serverProcess) {
+        // Show loading window immediately so user sees progress
+        createWindow();
+        const port = await startServerOnStablePort();
+        serverPort = port;
+        if (mainWindow) {
+          mainWindow.loadURL(`http://127.0.0.1:${port}`);
+        }
+      } else {
+        createWindow(`http://127.0.0.1:${serverPort || 3000}`);
+      }
+
+    } catch (err) {
+      console.error('Failed to restart server:', err);
+    }
+  }
+});
+
+app.on('before-quit', async (e) => {
+  // Stop the managed-account background poller so its timer doesn't keep
+  // the event loop alive past app.quit().
+  stopBackgroundPolling();
+  // Stop the auto-updater periodic check timer (also unref'd, belt-and-braces).
+  stopUpdater();
+  // 同理停掉内存采样定时器。
+  stopMetricsSampling();
+  if (isLoginWindowOpen()) cancelLoginWindow('before-quit');
+
+  // Kill all terminal processes
+  terminalManager.killAll();
+
+  // Kill any running install process (tree-kill on Windows)
+  if (installProcess) {
+    const pid = installProcess.pid;
+    try {
+      if (process.platform === 'win32' && pid) {
+        spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+      } else {
+        installProcess.kill();
+      }
+    } catch { /* already dead */ }
+    installProcess = null;
+  }
+
+  destroyTray();
+
+  if (serverProcess && !isQuitting) {
+    isQuitting = true;
+    e.preventDefault();
+    // Stop bridge gracefully before killing the server
+    await stopBridge();
+    await killServer();
+    // 兜底:确保正常退出后不留 pidfile(killServer 的 early-return 路径不会删)。
+    removeServerPidFile();
+    app.quit();
+  }
+});

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'self'">
+  <title>AIMate 登录</title>
+  <link rel="stylesheet" href="login-style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M16 18l6-6-6-6"></path>
+        <path d="M8 6l-6 6 6 6"></path>
+      </svg>
+    </div>
+    <h1>登录 AIMate 账号</h1>
+    <p class="subtitle">将在浏览器中完成登录，登录成功后自动返回应用</p>
+
+    <button id="login-btn" class="primary-btn" type="button">在浏览器中登录</button>
+
+    <!--
+      Skip button — REMOVED because login is now mandatory at startup and
+      on re-gate after logout. Both call sites pass allowSkip=false so the
+      #allow-skip URL hash never arrives anyway, but `hidden` alone was
+      being overridden by `.secondary-btn { display: block }` in
+      login-style.css. Comment is safer than relying on CSS specificity.
+      Restore by uncommenting the <button> element below AND the matching
+      block in login.js (see "skipBtn" inside the IIFE).
+      <button id="skip-btn" class="secondary-btn" type="button" hidden>跳过，手动配置 Provider</button>
+    -->
+
+    <div id="status" role="status" aria-live="polite"></div>
+  </div>
+  <script src="login.js"></script>
+</body>
+</html>

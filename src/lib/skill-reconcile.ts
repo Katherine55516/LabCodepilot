@@ -1,0 +1,298 @@
+/**
+ * skill-reconcile.ts — Mirror `~/.agents/skills/<name>` → `~/.claude/skills/<name>`.
+ *
+ * ## Why (same class of bug as the MCP settings.json→.claude.json migration, commit 46caccd)
+ *
+ * The bundled Claude Code binary discovers user-scope skills ONLY from
+ * `~/.claude/skills/` (plus project `.claude/skills/` and plugin skills).
+ * The `skills` CLI (skills.sh / vercel-labs) can install skills into the
+ * agent-neutral `~/.agents/skills/`. Those show up in CodePilot's slash
+ * popover — its discovery scans BOTH roots (skill-discovery.ts,
+ * api/skills/route.ts) — but the agent can't load them, producing the
+ * "skill listed in the UI but the agent says 'not found'" symptom.
+ *
+ * This copies each `~/.agents/skills/<name>/` into `~/.claude/skills/<name>/`
+ * so the bundled binary loads it natively (progressive disclosure, the Skill
+ * tool, and the system-prompt skill list then all work for free).
+ *
+ * ## Copy, not move (the one deviation from the MCP migration)
+ *
+ * `~/.agents/skills/` is the LEGITIMATE home of the external `skills` CLI and
+ * is tracked by `~/.agents/.skill-lock.json`. Moving the files would desync
+ * that CLI's lock and break `skills update/remove`. So we COPY and leave the
+ * source intact, marking our copies so we can refresh/remove them later
+ * without ever clobbering a skill we didn't create.
+ *
+ * ## Marker + conflict policy
+ *
+ * Each mirrored dir gets a `.codepilot-mirror.json` marker recording the
+ * source folder hash. On reconcile:
+ *   - dst missing             → copy + write marker                 (mirrored)
+ *   - dst has OUR marker      → re-copy only if source hash changed  (refreshed)
+ *   - dst has NO marker       → foreign skill (direct `--agent claude-code`
+ *                               install or user-authored); `~/.claude/skills/`
+ *                               WINS — left untouched                (skipped)
+ *   - OUR mirror, source gone → remove the orphan (parity w/ uninstall) (removed)
+ *
+ * Re-entrant, atomic (temp dir + rename), failure-safe (leaves state for a
+ * later retry). The core function is uncached so tests can drive it directly;
+ * `reconcileSkillsCached()` adds a short TTL for hot callers (chat stream,
+ * /api/skills).
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { invalidateSkillCache } from './skill-discovery';
+
+const MARKER = '.codepilot-mirror.json';
+
+interface MirrorMarker {
+  source: 'agents';
+  sourceHash: string;
+  mirroredAt: string;
+}
+
+export interface SkillReconcileResult {
+  /** Skills newly copied into ~/.claude/skills/. */
+  mirrored: string[];
+  /** Existing mirrors re-copied because the source folder hash changed. */
+  refreshed: string[];
+  /** Our orphaned mirrors removed because the source no longer exists. */
+  removed: string[];
+  /** Names that already exist in ~/.claude/skills/ without our marker (left untouched). */
+  skipped: string[];
+  /** True when any of mirrored/refreshed/removed is non-empty. */
+  changed: boolean;
+  error?: string;
+}
+
+function agentsSkillsDir(): string {
+  return path.join(os.homedir(), '.agents', 'skills');
+}
+
+function claudeSkillsDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills');
+}
+
+function sha1(buf: Buffer | string): string {
+  return crypto.createHash('sha1').update(buf).digest('hex');
+}
+
+/**
+ * Deterministic hash of a skill folder: every file's relative path + content,
+ * sorted, so an edit to SKILL.md OR any resource (README, scripts, assets)
+ * changes the hash. The mirror marker itself is excluded so it never feeds
+ * back into the source identity.
+ */
+function hashSkillDir(dir: string): string {
+  const parts: string[] = [];
+  const walk = (d: string, rel: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      if (e.name === MARKER) continue;
+      const abs = path.join(d, e.name);
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(abs, r);
+      } else if (e.isFile()) {
+        try {
+          parts.push(`${r}\0${sha1(fs.readFileSync(abs))}`);
+        } catch {
+          // unreadable file — skip; a transient read error shouldn't poison the hash
+        }
+      }
+    }
+  };
+  walk(dir, '');
+  return sha1(parts.join('\x01'));
+}
+
+function readMarker(dir: string): MirrorMarker | null {
+  try {
+    const raw = fs.readFileSync(path.join(dir, MARKER), 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<MirrorMarker>;
+    if (parsed && parsed.source === 'agents' && typeof parsed.sourceHash === 'string') {
+      return parsed as MirrorMarker;
+    }
+  } catch {
+    // no marker / unreadable / malformed → treat as "not ours"
+  }
+  return null;
+}
+
+/**
+ * Copy `srcDir` → `dstDir` atomically via a temp dir + rename, stamping the
+ * mirror marker. Returns true on success. On any failure the temp dir is
+ * cleaned up and the existing dst (if any) is left intact for a later retry.
+ */
+function copyMirror(srcDir: string, dstDir: string, claudeDir: string, name: string, srcHash: string): boolean {
+  const tmp = path.join(claudeDir, `.${name}.codepilot-tmp-${process.pid}-${Date.now()}`);
+  try {
+    if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
+    if (fs.existsSync(tmp)) fs.rmSync(tmp, { recursive: true, force: true });
+
+    fs.cpSync(srcDir, tmp, { recursive: true });
+
+    const marker: MirrorMarker = {
+      source: 'agents',
+      sourceHash: srcHash,
+      mirroredAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(tmp, MARKER), JSON.stringify(marker, null, 2), 'utf-8');
+
+    // renameSync can't clobber an existing directory on Windows — remove first.
+    // This is the only non-atomic window; it's confined to our own marked
+    // mirror, and a crash here just means the next reconcile re-copies.
+    if (fs.existsSync(dstDir)) fs.rmSync(dstDir, { recursive: true, force: true });
+    fs.renameSync(tmp, dstDir);
+    return true;
+  } catch (err) {
+    console.warn(`[skill-reconcile] failed to mirror "${name}":`, err instanceof Error ? err.message : err);
+    try {
+      if (fs.existsSync(tmp)) fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      // best-effort temp cleanup
+    }
+    return false;
+  }
+}
+
+/**
+ * Reconcile `~/.agents/skills/` into `~/.claude/skills/`. Idempotent and
+ * re-entrant: safe to call repeatedly. See the file header for the policy.
+ */
+export function reconcileAgentsSkillsToClaudeSkills(): SkillReconcileResult {
+  const result: SkillReconcileResult = {
+    mirrored: [],
+    refreshed: [],
+    removed: [],
+    skipped: [],
+    changed: false,
+  };
+
+  try {
+    const agentsDir = agentsSkillsDir();
+    const claudeDir = claudeSkillsDir();
+
+    // 1. Mirror / refresh: walk the source skills.
+    const sourceNames = new Set<string>();
+    if (fs.existsSync(agentsDir)) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.')) continue;
+        const srcDir = path.join(agentsDir, e.name);
+        if (!fs.existsSync(path.join(srcDir, 'SKILL.md'))) continue;
+
+        sourceNames.add(e.name);
+        const dstDir = path.join(claudeDir, e.name);
+        const srcHash = hashSkillDir(srcDir);
+
+        if (!fs.existsSync(dstDir)) {
+          if (copyMirror(srcDir, dstDir, claudeDir, e.name, srcHash)) {
+            result.mirrored.push(e.name);
+            result.changed = true;
+          }
+          continue;
+        }
+
+        const marker = readMarker(dstDir);
+        if (!marker) {
+          // A skill of this name already lives in ~/.claude/skills/ that we
+          // did NOT create (e.g. a direct `--agent claude-code` install or a
+          // user-authored skill). That copy is what the binary loads, so it
+          // wins — never clobber it.
+          result.skipped.push(e.name);
+          continue;
+        }
+        if (marker.sourceHash !== srcHash) {
+          if (copyMirror(srcDir, dstDir, claudeDir, e.name, srcHash)) {
+            result.refreshed.push(e.name);
+            result.changed = true;
+          }
+        }
+      }
+    }
+
+    // 2. Orphan cleanup: our mirrors whose source vanished (uninstalled via
+    //    the `skills` CLI). Only ever touch dirs carrying OUR marker.
+    if (fs.existsSync(claudeDir)) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(claudeDir, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.')) continue;
+        if (sourceNames.has(e.name)) continue;
+        const dstDir = path.join(claudeDir, e.name);
+        if (!readMarker(dstDir)) continue; // foreign skill — leave it alone
+        try {
+          fs.rmSync(dstDir, { recursive: true, force: true });
+          result.removed.push(e.name);
+          result.changed = true;
+        } catch {
+          // leave for a later retry
+        }
+      }
+    }
+
+    if (result.changed) {
+      // CodePilot's own discovery (native Skill tool) caches its scan — drop it
+      // so the freshly mirrored set is visible there too.
+      try {
+        invalidateSkillCache();
+      } catch {
+        // non-critical
+      }
+      console.log(
+        `[skill-reconcile] mirrored=${result.mirrored.length} refreshed=${result.refreshed.length} ` +
+          `removed=${result.removed.length} skipped=${result.skipped.length}`,
+      );
+    }
+  } catch (err) {
+    result.error = err instanceof Error ? err.message : String(err);
+    console.warn('[skill-reconcile] failed:', result.error, '— state left intact, will retry on next call');
+  }
+
+  return result;
+}
+
+// ── Cached wrapper for hot paths ─────────────────────────────────────
+
+let _lastRun = 0;
+let _lastResult: SkillReconcileResult | null = null;
+const RECONCILE_TTL_MS = 15_000;
+
+/**
+ * TTL-cached reconcile for hot callers (chat stream, /api/skills). The first
+ * call does the work; subsequent calls within the TTL return the cached
+ * result. Call `invalidateSkillReconcileCache()` (e.g. right after a
+ * marketplace install) to force the next call through.
+ */
+export function reconcileSkillsCached(): SkillReconcileResult {
+  if (_lastResult && Date.now() - _lastRun < RECONCILE_TTL_MS) {
+    return _lastResult;
+  }
+  const r = reconcileAgentsSkillsToClaudeSkills();
+  _lastRun = Date.now();
+  _lastResult = r;
+  return r;
+}
+
+export function invalidateSkillReconcileCache(): void {
+  _lastRun = 0;
+  _lastResult = null;
+}
