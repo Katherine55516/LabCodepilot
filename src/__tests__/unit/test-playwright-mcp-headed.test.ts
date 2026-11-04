@@ -58,7 +58,10 @@ describe("buildPlaywrightMcp · dev 态(无随包 headless_shell)", () => {
 describe("buildPlaywrightMcp · 打包态(随包 chrome-headless-shell)", () => {
   let resources: string;
   let fakeChrome: string;
+  // The host may preset its own browser root (CI images do); these cases assert what the builder injects.
+  const inheritedBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   before(() => {
+    delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     // 造一个随包目录结构,让 resolveBundledHeadlessShell 命中一个假 headless_shell。
     resources = fs.mkdtempSync(path.join(os.tmpdir(), "ailab-resources-"));
     const exe = process.platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
@@ -73,6 +76,7 @@ describe("buildPlaywrightMcp · 打包态(随包 chrome-headless-shell)", () => 
   after(() => {
     delete process.env.AILAB_RESOURCES_PATH;
     delete process.env.AILAB_CHROME_PATH;
+    if (inheritedBrowsersPath !== undefined) process.env.PLAYWRIGHT_BROWSERS_PATH = inheritedBrowsersPath;
     try { fs.rmSync(resources, { recursive: true, force: true }); } catch {}
   });
 

@@ -22,7 +22,8 @@ db.upsertProviderModel({...existingModel,provider_id:provider.id,model_id:model,
 for(const [k,v] of Object.entries({current_user_uid:uid,cowork_remote_url:'http://127.0.0.1:'+backendPort,cowork_remote_token:token,global_default_model_provider:provider.id,global_default_model:model,locale:'zh'}))db.setSetting(k,v);db.closeDb();
 process.env.COWORK_STATE_DIR=out+'/state';const lib=n=>import(root+'/apps/cowork-server/lib/'+n+'.mjs');
 const [api,store,template,imports,fidelity,render,source,pdf,{localPptRuntime}]=await Promise.all([...['ppt-api','ppt-store','ppt-template','ppt/import-pptx','ppt-template-fidelity','ppt-render','ppt-source','ppt-pdf'].map(lib),import(root+'/apps/cowork-server/test/ppt-local-runtime.mjs')]);
-const runtime=localPptRuntime(out+'/workspace',process.env.PPT_TEST_PYTHON||'/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3');
+const codexPython='/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+const runtime=localPptRuntime(out+'/workspace',process.env.PPT_TEST_PYTHON||(fs.existsSync(codexPython)?codexPython:'python3'));
 const log=(kind,value={})=>fs.appendFileSync(out+'/events.jsonl',JSON.stringify({at:new Date().toISOString(),kind,...value})+'\n');
 // Production containers ship LibreOffice/Tesseract/Poppler; this host runtime
 // may not. Record the gap so parser results here are not mistaken for
