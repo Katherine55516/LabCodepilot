@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 import { planTemplateSlideMap, profileTemplateSlide, visualSimilarity, maxPreservedPages, catalogTemplateLayouts, templateContentFit,
   templateReuseError, _internals } from './lib/ppt-template-scheduler.mjs';
 import { _internals as importer, projectFromImportedManifest } from './lib/ppt/import-pptx.mjs';
@@ -12,7 +12,7 @@ import { fidelityFromImported, _internals as fidelityInternals } from './lib/ppt
 const python = process.env.PPT_TEST_PYTHON || '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-template-scheduler-'));
 const run = (script, input = '', environment = {}) => {
-  const result = spawnSync(python, ['-c', script], { input, env: { ...process.env, ...environment }, maxBuffer: 30_000_000 });
+  const result = spawnPythonSync(python, script, [], { input, env: { ...process.env, ...environment }, maxBuffer: 30_000_000 });
   assert.equal(result.status, 0, result.stderr.toString());
   return result.stdout.toString();
 };

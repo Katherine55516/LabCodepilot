@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {spawnPythonSync} from './test/ppt-local-runtime.mjs';
 import {_internals} from './lib/ppt/import-pptx.mjs';
 
 const python=process.env.PPT_TEST_PYTHON||'python3',root=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-native-image-'));
@@ -20,7 +21,7 @@ p=Presentation();s=p.slides.add_slide(p.slide_layouts[6]);s.shapes.add_picture(s
  assert.equal(make.status,0,make.stderr);
  const image={id:'source-figure',type:'image',geometry:{x:914400,y:914400,width:1828800,height:914400},content:{dataUrl:'data:image/png;base64,'+fs.readFileSync(picture).toString('base64')},sourceArtifact:{sourceUnitId:'image-1',type:'SourceImage'},style:{}};
  const input=JSON.stringify({original,fonts:{title:'Arial',body:'Arial',titleEastAsia:'Arial',bodyEastAsia:'Arial'},slides:[{nativeSlideIndex:0,omitShapeIds:[2,3],nodes:[],sourceArtifacts:[image]}]});
- const run=(script,file,payload=input)=>spawnSync(python,['-c',script],{input:payload,encoding:'utf8',env:{...process.env,PPT_OUTPUT:path.join(root,file)},maxBuffer:8e6});
+ const run=(script,file,payload=input)=>spawnPythonSync(python,script,[],{input:payload,encoding:'utf8',env:{...process.env,PPT_OUTPUT:path.join(root,file)},maxBuffer:8e6});
  const result=run(_internals.EXPORT_SCRIPT,'result.pptx');assert.equal(result.status,0,result.stderr);
  const read=spawnSync(python,['-c',`from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE

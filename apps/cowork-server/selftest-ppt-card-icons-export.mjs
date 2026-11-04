@@ -3,6 +3,7 @@
 // the preserved-template exporter writes them as PNG pictures, and the media
 // ledger raises nothing for them.
 import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawnSync} from 'node:child_process';
+import {spawnPythonSync} from './test/ppt-local-runtime.mjs';
 import {bindThemeCardPage,cardShape} from './lib/ppt-card-pages.mjs';
 import {planCardIcons} from './lib/ppt-card-icons.mjs';
 import {isSourceOwnedNode} from './lib/ppt-source-artifacts.mjs';
@@ -36,7 +37,7 @@ assert.deepEqual(inspectMediaLedger(ledger,{cards:true}).filter(issue=>/icon|med
 const original=path.join(root,'original.pptx'),out=path.join(root,'out.pptx');
 const blank=spawnSync(python,['-c','from pptx import Presentation\nfrom pptx.util import Emu\nimport sys\np=Presentation();p.slide_width=Emu(12192000);p.slide_height=Emu(6858000);p.slides.add_slide(p.slide_layouts[6]);p.save(sys.argv[1])',original],{encoding:'utf8'});
 assert.equal(blank.status,0,blank.stderr);
-const run=spawnSync(python,['-c',nativeExporter.EXPORT_SCRIPT],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:slide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:out},maxBuffer:2e7});
+const run=spawnPythonSync(python,nativeExporter.EXPORT_SCRIPT,[],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:slide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:out},maxBuffer:2e7});
 assert.equal(run.status,0,run.stderr.toString());
 const read=spawnSync(python,['-c',String.raw`
 import sys,json
@@ -63,7 +64,7 @@ assert.ok(pictures.every(([type,w,h])=>type==='image/png'&&w===h&&w>0),'square P
  const grid=panelSlide.nodes.find(node=>node.type==='list'&&node.content?.pointLayout);
  assert.equal(grid.content.pointLayout.panelFill,'#2e2f23');assert.equal(grid.content.pointLayout.panelText,'#ecf0db');assert.deepEqual(grid.content.pointLayout.markers,['1','2','3']);
  const panelOut=path.join(root,'panel.pptx');
- const exported=spawnSync(python,['-c',nativeExporter.EXPORT_SCRIPT],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:panelSlide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:panelOut},maxBuffer:2e7});
+ const exported=spawnPythonSync(python,nativeExporter.EXPORT_SCRIPT,[],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:panelSlide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:panelOut},maxBuffer:2e7});
  assert.equal(exported.status,0,exported.stderr.toString());
  const fills=spawnSync(python,['-c',String.raw`
 import sys,json
@@ -91,7 +92,7 @@ print(json.dumps(out))`,panelOut],{encoding:'utf8'});
   const list=mathSlide.nodes.find(node=>node.type==='list'&&node.content?.pointLayout);
   assert.ok(list.content.items.some(item=>item.bodyRich?.runs?.some(run=>run.kind==='math')),shape+': items carry their math');
   const mathOut=path.join(root,shape+'-math.pptx');
-  const exported=spawnSync(python,['-c',nativeExporter.EXPORT_SCRIPT],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:mathSlide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:mathOut},maxBuffer:2e7});
+  const exported=spawnPythonSync(python,nativeExporter.EXPORT_SCRIPT,[],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:mathSlide.nodes.filter(isSourceOwnedNode)}],fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'}}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:mathOut},maxBuffer:2e7});
   assert.equal(exported.status,0,exported.stderr.toString());
   const read=spawnSync(python,['-c',String.raw`
 import sys,json

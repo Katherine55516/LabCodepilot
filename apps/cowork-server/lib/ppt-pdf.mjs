@@ -1,5 +1,6 @@
 /** PDF export from the same validated slide IR in the project Cowork container. */
 import { spawn } from 'node:child_process';
+import { PYTHON_STDIN_ARGS, pythonStdinInput } from './ppt-python-stdin.mjs';
 import * as orch from './orchestrator.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { OFFICE_FONT_ENV_SCRIPT, OFFICE_BINARY_SCRIPT } from './ppt-fonts.mjs';
@@ -192,7 +193,7 @@ export async function renderPdf(project,io={}) {
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
     const preserved = true;
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE=${project.publishedArtifactPath || '/workspace/presentation.pptx'}`, '-e', `PPT_OUTPUT=${project.pdfArtifactPath || '/workspace/presentation.pdf'}`, name, 'python3', '-c', preserved ? PRESERVED_SCRIPT : SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE=${project.publishedArtifactPath || '/workspace/presentation.pptx'}`, '-e', `PPT_OUTPUT=${project.pdfArtifactPath || '/workspace/presentation.pdf'}`, name, 'python3', ...PYTHON_STDIN_ARGS], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = ''; let error = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -204,7 +205,7 @@ export async function renderPdf(project,io={}) {
       try { resolve(JSON.parse(output)); } catch { reject(new Error('PDF renderer returned invalid result')); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(preserved ? '' : JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts }));
+    child.stdin.end(pythonStdinInput(preserved ? PRESERVED_SCRIPT : SCRIPT, preserved ? '' : JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts })));
   });
 }
 

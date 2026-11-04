@@ -3,6 +3,7 @@ import { templateLimits, TemplateError, templateError, TEMPLATE_SECURITY_SCRIPT 
 /** Versioned template registry. Uploaded decks are analyzed in Cowork; only
  * templates whose colors can be mapped to our deterministic layout are usable. */
 import { spawn } from 'node:child_process';
+import { PYTHON_STDIN_ARGS, pythonStdinInput } from './ppt-python-stdin.mjs';
 import * as orch from './orchestrator.mjs';
 import { THEME_SCRIPT } from './ppt-theme.mjs';
 
@@ -296,6 +297,6 @@ export function runTemplateParser(command, args, bytes, env = {}) {
 export async function analyzeTemplate(uid, id, extension, bytes, io = {}) {
   if(io.runPython)return io.runPython({uid,id},SCRIPT,bytes,{PPT_TEMPLATE_EXT:extension,PPT_TEMPLATE_LIMITS:JSON.stringify(templateLimits())});
   const { name } = await orch.ensureContainer(id, uid, orch.KIND_PPT);
-  return runTemplateParser('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_EXT=${extension}`, '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, name, 'python3', '-c', SCRIPT], bytes);
+  return runTemplateParser('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_EXT=${extension}`, '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, name, 'python3', ...PYTHON_STDIN_ARGS], pythonStdinInput(SCRIPT, bytes));
 }
 export const _internals = { SCRIPT };

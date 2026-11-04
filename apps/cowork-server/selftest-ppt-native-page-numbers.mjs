@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawnSync} from 'node:child_process';
+import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawnSync} from 'node:child_process';import {spawnPythonSync} from './test/ppt-local-runtime.mjs';
 import {_internals,renderImportedPptx} from './lib/ppt/import-pptx.mjs';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-native-numbers-')),python=process.env.PPT_TEST_PYTHON||process.env.PPT_PYTHON||'python3';
 const execute=(script,args=[],input)=>{const r=spawnSync(python,['-c',script,...args],{input,encoding:'utf8',maxBuffer:8e6});assert.equal(r.status,0,r.stderr);return r.stdout;};
@@ -27,7 +27,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
  const before=JSON.parse(execute(inspect,[original]));assert.ok(before.numbers>=2);
  for(const canonicalPageNumbers of [false,true]){
   const file=path.join(root,String(canonicalPageNumbers)+'.pptx');
-  const r=spawnSync(python,['-c',_internals.EXPORT_SCRIPT],{input:JSON.stringify({original,canonicalPageNumbers,fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'},slides:[{nativeSlideIndex:0,nodes:[]},{nativeSlideIndex:1,nodes:[]}]}),env:{...process.env,PPT_OUTPUT:file},encoding:'utf8',maxBuffer:8e6});assert.equal(r.status,0,r.stderr);
+  const r=spawnPythonSync(python,_internals.EXPORT_SCRIPT,[],{input:JSON.stringify({original,canonicalPageNumbers,fonts:{title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'},slides:[{nativeSlideIndex:0,nodes:[]},{nativeSlideIndex:1,nodes:[]}]}),env:{...process.env,PPT_OUTPUT:file},encoding:'utf8',maxBuffer:8e6});assert.equal(r.status,0,r.stderr);
   const after=JSON.parse(execute(inspect,[file]));assert.equal(after.numbers,canonicalPageNumbers?0:before.numbers);assert.equal(after.dates,before.dates);assert.equal(after.brands,before.brands);
  }
  const base={id:'n',uid:'n',deck:{slides:[{id:'s1',title:'Cover',nativeSlideIndex:0,nodes:[]},{id:'s2',title:'Body',nativeSlideIndex:1,nodes:[{id:'number',type:'text',semanticRole:'page-number',geometry:{x:0,y:0,width:914400,height:300000},style:{fontSizePt:10},content:{text:'2'}}]}]},externalPptx:{mode:'preserve',width:9144000,height:5143500,originalPath:original},templateSpec:{fonts:{body:'Arial'}}};

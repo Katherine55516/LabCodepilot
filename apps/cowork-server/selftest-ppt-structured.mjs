@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 import { EventEmitter } from 'node:events';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-structured-'));
@@ -174,7 +175,7 @@ b=io.BytesIO(); p.save(b); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer:
     assert.equal(parsed.status, 0, parsed.stderr.toString()); const manifest = JSON.parse(parsed.stdout);
     assert.equal(manifest.slides.length, 1); assert.equal(manifest.slides[0].shapes.length, 3);
     const textShape = manifest.slides[0].shapes.find(shape => shape.kind === 'text'); const output = path.join(root, 'preserved.pptx');
-    const exported = spawnSync(python, ['-c', importer._internals.EXPORT_SCRIPT], { input: JSON.stringify({ original: manifest.path, fonts: templateSpec.fonts, slides: [{ nativeSlideIndex: 0, nodes: [{ nativeShapeId: textShape.shapeId, type: 'text', semanticRole: 'title', content: { text: '编辑后的中文标题' }, geometry: { x: textShape.x, y: textShape.y, width: textShape.width, height: textShape.height } }] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 4_000_000 });
+    const exported = spawnPythonSync(python, importer._internals.EXPORT_SCRIPT, [], { input: JSON.stringify({ original: manifest.path, fonts: templateSpec.fonts, slides: [{ nativeSlideIndex: 0, nodes: [{ nativeShapeId: textShape.shapeId, type: 'text', semanticRole: 'title', content: { text: '编辑后的中文标题' }, geometry: { x: textShape.x, y: textShape.y, width: textShape.width, height: textShape.height } }] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 4_000_000 });
     assert.equal(exported.status, 0, exported.stderr.toString());
     const inspected = spawnSync(python, ['-c', `from pptx import Presentation; from zipfile import ZipFile; import hashlib,sys
 p=Presentation(sys.argv[1]); original=Presentation(sys.argv[2]); assert (p.slide_width,p.slide_height)==(original.slide_width,original.slide_height)==(9144000,6858000); assert len(p.slides[0].shapes)==3; assert any(getattr(s,'text','')=='编辑后的中文标题' for s in p.slides[0].shapes)

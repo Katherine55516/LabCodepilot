@@ -7,6 +7,7 @@ import {fitNativeTextFrames,fitSourceMathFrames} from '../ppt-native-text-fit.mj
 import {SOURCE_MATH_SCRIPT} from '../ppt-source-math-python.mjs';
 import { titleFromNativeShapes } from '../ppt-editorial-review.mjs';
 import { EXPORT_VERIFY_SCRIPT } from './export-verifier-python.mjs';
+import { PYTHON_STDIN_ARGS, pythonStdinInput } from '../ppt-python-stdin.mjs';
 import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
 import { OFFICE_MATH_SCRIPT } from '../ppt-math.mjs';
 import { exportManifest } from '../ppt-export-integrity.mjs';
@@ -919,7 +920,7 @@ print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize
 
 function runPython(project, script, input, max = Math.min(templateLimits().managedBytes * 2, templateLimits().memoryBytes / 4)) {
   return orch.ensureContainer(project.id, project.uid, orch.KIND_PPT).then(({ name }) => new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', ...PYTHON_STDIN_ARGS], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('template_timeout: PPTX operation timed out')); }, script === IMPORT_SCRIPT ? templateLimits().timeoutMs : 120000); timer.unref();
     child.stdout.setEncoding('utf8');
@@ -928,7 +929,7 @@ function runPython(project, script, input, max = Math.min(templateLimits().manag
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-3000); });
     child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', code => { clearTimeout(timer); if (code) reject(new Error(`PPTX fidelity operation failed: ${err.slice(-500)}`)); else { try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX fidelity operation returned invalid JSON')); } } });
-    child.stdin.on('error', () => {}); child.stdin.end(input);
+    child.stdin.on('error', () => {}); child.stdin.end(pythonStdinInput(script, input));
   }));
 }
 

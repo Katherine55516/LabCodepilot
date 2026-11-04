@@ -1,5 +1,6 @@
 import {POINT_CARDS_SCRIPT} from './ppt-point-cards-python.mjs';
 import { EXPORT_VERIFY_SCRIPT } from './ppt/export-verifier-python.mjs';
+import { PYTHON_STDIN_ARGS, pythonStdinInput } from './ppt-python-stdin.mjs';
 /** Deterministic PPTX export. python-pptx executes INSIDE the project's Cowork
  * container, which already ships it in the bundled office image. The host only
  * passes validated IR and later streams the resulting file from its volume. */
@@ -547,7 +548,7 @@ export async function renderPptx(project, io = {}) {
   if(io.runPython)return io.runPython(project,SCRIPT,payload);
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', ...PYTHON_STDIN_ARGS], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -559,7 +560,7 @@ export async function renderPptx(project, io = {}) {
       try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX renderer returned invalid result')); }
     });
     child.stdin.on('error', () => { /* child exit is handled above */ });
-    child.stdin.end(payload);
+    child.stdin.end(pythonStdinInput(SCRIPT, payload));
   });
 }
 

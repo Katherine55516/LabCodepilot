@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 import { Readable } from 'node:stream';
 import { _internals as importer, projectFromImportedManifest } from './lib/ppt/import-pptx.mjs';
 import { _internals as fidelityInternals, fidelityFromImported, rescheduleTemplateFidelity, bindTemplateFidelity, fitNativeTitleFrames, inspectTemplateFidelity, inspectTemplateSlotDraft, templateSlotPrompt } from './lib/ppt-template-fidelity.mjs';
@@ -42,7 +43,7 @@ const output = path.join(root, 'generated.pptx');
   for (const variant of [{ locked: true }]) { const candidate = { nodes: [{ ...structuredClone(before), ...variant }] };fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, candidate);assert.deepEqual(candidate.nodes[0].geometry, before.geometry); }
 }
 const run = (script, input, extraEnv = {}) => {
-  const result = spawnSync(python, ['-c', script], { input, env: { ...process.env, ...extraEnv }, maxBuffer: 30_000_000 });
+  const result = spawnPythonSync(python, script, [], { input, env: { ...process.env, ...extraEnv }, maxBuffer: 30_000_000 });
   assert.equal(result.status, 0, result.stderr.toString());
   return result.stdout.toString();
 };
