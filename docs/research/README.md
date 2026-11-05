@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| [gamma-reverse-engineering-20261105.md](gamma-reverse-engineering-20261105.md) | Gamma 逆向（公开 API/MCP 契约 + 既有实测，🟢/🟡/🔴 置信标记）：文档模型与两代引擎、生成流水线与进度阶段、内容处理与密度、图片来源/accent 图/URL 转存/图像模型、主题与模板、编辑、导入导出、API 限额与计费；与 AIMate PPT 引擎逐项差距及已实现的 Gamma 兼容 API |
 | [ppt-frame-reuse-20261103.md](ppt-frame-reuse-20261103.md) | 模板框架复用过多的根因（逐页贪心、严重分数仍算放得下）与修复（放得下且未超限且不相邻优先、让位、图文/对象页兜底分摊），基于fill-template-first线；16份成稿回放超限7→6、相邻7→1、放不下68→64；预留稀缺框架（方案2）试过未采用 |
 | [ppt-quality-111-and-deck-review-20261027.md](ppt-quality-111-and-deck-review-20261027.md) | 3157六份成稿114页只读评审；量化稿111条逐项裁决、真实内容/公式/渲染缺陷与误报、12类根因、优先级及待实施方案（未改代码） |
 | [PPT_Outline_vs_Gamma_Simplification_20261022.md](PPT_Outline_vs_Gamma_Simplification_20261022.md) | 10_alpha_mining 在 Gamma 实测与对照、失败原因与方案、Gamma 式卡片大纲（一步写卡片、逐主题显示、直接编辑、暂停补充要求）已实施，R1–R8 已删除，3143 全流程实测结果与待决的模板版式映射问题 |

@@ -6,6 +6,8 @@
 
 ## 索引
 
+- [PPT Gamma 兼容 API（Gamma 公共 API v1.0 子集）](ppt-gamma-compat.md)：Classic/Gamma 5 创建与轮询、主题、签名下载；参数映射与拒绝/警告规则、轮询驱动的引擎推进、图片 URL 抓取与私网防护、`ppt_gamma_jobs` 表。
+
 - [PPT 111项质量修复与同输入验收](ppt-quality-111-remediation-20261027.md)：内容表/数学/Canvas、检查器、容器与版本；保留首轮真实失败和后续复测证据。
 
 - [PPT 上传模板：模板页识别与原生填充（fill-template-first MVP，验收中）](ppt-template-fill.md)：模板页 profile 接口、原生文本框与图位填充、固定页、图页用模板图位、生成被拒的提示

@@ -56,6 +56,7 @@
 
 ### 本轮已完成
 
+- [PPT Gamma 兼容 API](completed/ppt-gamma-compat-20261105.md)：Gamma 公共 API v1.0 子集（Classic/Gamma 5 创建与轮询、主题、签名下载）驱动 PPT 引擎；真实登录版端到端待跑。
 - [PPT 111项质量复核后的修复与同源回归](completed/ppt-quality-111-remediation-20261027.md)：内容/公式/Canvas、检查器误报与来源版本、排版媒体及C9空框；3159单测、13领域回归和真实同源生成/原生回读通过，保留未验证边界。
 
 - [局部填框来源自动分配](completed/ppt-component-source-allocation-20261027.md)：来源流程跨框分配与容量规划；原C6同短指令真实Qwen首次通过、独立语义核验及原生导出，3135项单测通过。
