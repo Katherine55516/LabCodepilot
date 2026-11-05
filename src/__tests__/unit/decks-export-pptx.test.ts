@@ -277,3 +277,19 @@ describe('helpers', () => {
     assert.deepEqual(imageSize(jpeg, 'image/jpeg'), { w: 600, h: 300 });
   });
 });
+
+describe('buildDeckPptx — header/footer logo image (report 05 §6)', () => {
+  it('draws an uploaded logo as an image and keeps text logos as text', async () => {
+    const deck = deckOf([card([{ id: id('b'), type: 'heading', level: 1, text: 'Logo deck' }]), card([{ id: id('b'), type: 'paragraph', text: 'Body' }])], {
+      title: 'Logo deck',
+      headerFooter: { topLeft: { type: 'logo', mediaId: 'media_photo', size: 'lg' }, topRight: { type: 'logo', value: 'ACME text' }, bottomLeft: { type: 'logo', mediaId: 'missing_media' } },
+    });
+    const { slides } = await unzip(await buildDeckPptx(deck, { readMedia }));
+    for (const xml of slides) {
+      assert.match(xml, /name="Logo"/, 'logo picture on every slide');
+      assert.match(xml, /ACME text/, 'text logo stays text');
+    }
+    // A logo whose media is missing falls back to text (the deck title).
+    assert.ok(slides.every(xml => (xml.match(/Logo deck/g) || []).length >= 1));
+  });
+});

@@ -66,3 +66,52 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
     </div>
   );
 }
+
+export interface RadioCardOption<T extends string> { value: T; label: ReactNode; description?: ReactNode; icon?: ReactNode }
+
+/**
+ * Radio cards: native radio inputs (arrow keys and screen readers work as
+ * usual) styled as selectable cards with a title and an explanation.
+ */
+export function RadioCards<T extends string>({ name, legend, options, value, onChange, className, columns = 1 }: {
+  name: string; legend: ReactNode; options: RadioCardOption<T>[]; value: T; onChange: (value: T) => void; className?: string; columns?: 1 | 2 | 3;
+}) {
+  return (
+    <fieldset className={cn('flex min-w-0 flex-col gap-1.5', className)}>
+      <legend className="mb-1.5 text-sm font-medium leading-none">{legend}</legend>
+      <div className={cn('grid gap-2', columns === 2 && 'sm:grid-cols-2', columns === 3 && 'sm:grid-cols-3')}>
+        {options.map(option => {
+          const id = `${name}-${option.value}`;
+          return (
+            <label
+              key={option.value}
+              htmlFor={id}
+              className={cn(
+                'flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/70 p-3 transition-colors',
+                'hover:bg-muted/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5',
+                'has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
+              )}
+            >
+              <input
+                id={id}
+                type="radio"
+                name={name}
+                value={option.value}
+                checked={option.value === value}
+                onChange={() => onChange(option.value)}
+                aria-labelledby={`${id}-label`}
+                aria-describedby={option.description ? `${id}-hint` : undefined}
+                className="mt-0.5 size-4 shrink-0 accent-primary outline-none"
+              />
+              {option.icon && <span aria-hidden className="mt-0.5 shrink-0 text-muted-foreground">{option.icon}</span>}
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span id={`${id}-label`} className="text-sm font-medium">{option.label}</span>
+                {option.description && <span id={`${id}-hint`} className="text-xs text-muted-foreground">{option.description}</span>}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}

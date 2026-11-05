@@ -1,13 +1,14 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Copy, Sparkle, Trash, X } from '@phosphor-icons/react';
+import { ArrowDown, ArrowUp, Copy, Sliders, Sparkle, Trash, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import type { Block } from '@/lib/decks/types';
 import { useDecksT, type DecksStringKey } from '../i18n';
 import { blockSnippet } from './card-ops';
 import { BLOCK_ICONS } from './InsertBlockMenu';
+import { isInspectable } from './inspector/BlockInspector';
 
-export type BlockAction = 'up' | 'down' | 'duplicate' | 'delete' | 'askAi' | 'deselect';
+export type BlockAction = 'up' | 'down' | 'duplicate' | 'delete' | 'askAi' | 'inspect' | 'deselect';
 
 interface BlockToolbarProps {
   block: Block;
@@ -15,7 +16,7 @@ interface BlockToolbarProps {
   onChange: (next: Block) => void;
 }
 
-/** Toolbar for the selected block: label, heading level, move, duplicate, delete, ask AI. */
+/** Toolbar for the selected block: label, heading level, edit in the Block tab, move, duplicate, delete, ask AI. */
 export function BlockToolbar({ block, onAction, onChange }: BlockToolbarProps) {
   const t = useDecksT();
   const IconComponent = BLOCK_ICONS[block.type];
@@ -40,6 +41,7 @@ export function BlockToolbar({ block, onAction, onChange }: BlockToolbarProps) {
           ))}
         </div>
       )}
+      {isInspectable(block) && icon('inspect', t('decks.editor.inspector.open'), <Sliders size={16} />)}
       {icon('up', t('decks.editor.moveUp'), <ArrowUp size={16} />)}
       {icon('down', t('decks.editor.moveDown'), <ArrowDown size={16} />)}
       {icon('duplicate', t('decks.editor.duplicate'), <Copy size={16} />)}

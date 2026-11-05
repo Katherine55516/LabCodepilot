@@ -136,14 +136,42 @@ GET /events（SSE，400 ms 检查变化）──► useDeckLive ──► 页面
 - **控制台**：Decks 请求无 4xx/5xx。仅见既有 PPT 后台轮询（`/api/ppt/projects`、`/api/ppt/model-jobs`）的 401，原因是本地 dev 无登录体系，与本模块无关。
 - **未验证**：真实服务商的端到端生成（本环境无模型凭据），只验证了 mock 模型下的逻辑与界面；AI 图片生成路径同理，只测试了失败时退回主题图的分支。
 
+## 8b. 第二轮细化（2026-11-05，按逆向报告补齐）
+
+| 能力 | 实现 | 报告依据 |
+|---|---|---|
+| 推荐版式：用卡片的真实内容预览 ≤6 种排法，一键应用（记一次版本） | `src/lib/decks/layout-suggestions.ts`（纯函数，不编造文字）、`editor/SuggestedLayouts.tsx`、`useEditorState.applyCard` | 04 §2、05 §5 |
+| 元素检查器：表格、图表、指标、时间线、步骤、网格、图片、提示框、引用、代码的手动编辑表单 | `editor/inspector/*`、侧栏新增“元素”标签、块工具栏“编辑元素” | 06 §3 |
+| 页眉页脚 logo 图片（上传，sm/md/lg/xl），无图时退回文字；PPTX 同样输出图片；卡片编号导出为 PowerPoint 原生页码字段 | `HeaderFooterDialog`、`HeaderFooterLogo`、`CardView` `LOGO_HEIGHT`、`export-pptx.ts` | 05 §6 |
+| Plan / Express：Express 在大纲完成后直接生成 | `settings.mode`、`engine.startOutline` 末尾 `startBuild` | 02 §3 |
+| 导入：.pptx/.potx/.md/.txt，意图“原样导入 / 换用新主题 / 精简为新演示” | `src/lib/decks/import.ts`、`import-pptx.ts`、`POST /api/decks/import`、创建页“导入”标签 | 06 §4 |
+| 预置大纲创建路径（导入、API 用） | `CreateDeckRequest.outline` → 跳过规划 | — |
+| Gamma 兼容 API 指向 Decks 引擎（生成、状态与逐卡进度、编辑、导出、读取、主题） | `src/lib/decks/gamma-api.ts`、`/api/decks/gamma/v1.0/*`，详见 [decks-gamma-api.md](decks-gamma-api.md) | 07、08 |
+
+**本轮修复的缺陷（浏览器实测发现）**
+- 列表块没有圆点 / 编号：Tailwind 基础样式清除了 `ul/ol` 的列表符号。CardView 现在显式设置 `listStyleType`。
+- 自己导出的 PPTX 再导入时，卡片编号成了要点，指标的数值和标签被拆开：
+  - 导出器改用原生页码字段，导入器可以识别并跳过；
+  - 导入器新增 `mergeValueLabels`，合并“纯数值 + 说明”；
+  - `decks-roundtrip.test.ts` 覆盖这条往返路径。
+
+**本轮验证**
+- Decks 测试 100 个全过：引擎 18、PPTX 21、导入 18、兼容 API 13、推荐版式 16、块编辑 9、往返 2、其他 3。
+- `npm run test` 3,291 个，0 失败。
+- Playwright 实测（3031 端口，mock 模型），过程中没有 4xx/5xx 之外的报错：
+  - Express 生成；推荐版式（5 种预览）及应用；
+  - 指标块检查器；页眉页脚 logo 上传并显示在卡片上；
+  - 导出 PPTX 后再原样导入；移动端 390 宽无横向滚动。
+
 ## 9. 已知局限与下一步
 
-- **Gamma 兼容 API**：`/api/ppt/gamma/v1.0` 仍指向 `/ppt` 引擎；改为可选 Decks 引擎在执行计划 Phase 5。
-- **未复刻**：文件导入（PPTX/PDF）、MCP 工具、评论与分析、站点发布、多人协作。
+- **Gamma 兼容 API**：`/api/decks/gamma/v1.0` 已指向 Decks 引擎；`/api/ppt/gamma/v1.0` 仍保留给 `/ppt`。
+- **未复刻**：PDF 导入、MCP 工具、评论与分析、站点发布、多人协作。
 - **图片来源**：没有图库/网页图片来源，需要授权的第三方 API。
 - **容量判断**：是按行估算，最终以渲染为准；PPTX 导出在内容过多时按比例缩小字号（下限 10 pt）。
-- **手动编辑**：表格、图表、指标卡没有手动编辑表单，只能通过 AI 编辑修改；块工具栏在卡片上方，不贴着块浮动。
-- **页眉页脚**：logo 槽显示的是文字，不是图片。
+- **元素检查器**：列表、标题、段落没有表单，直接在卡片上编辑；块工具栏在卡片上方，不贴着块浮动。
+- **推荐版式**：只重排卡片上的第一个列表类块。
+- **导入**：只读文字、表格文字和演讲者备注，不读图片、版式和图表；PDF / .ppt / Keynote 暂不支持。
 - **PPTX 导出**：字体只取主题字体栈的第一项且不嵌入；装饰图 SVG 的 PNG 回退只是渐变色块；饼图图例样式与屏幕上略有不同。
 - **mock 模型**：只用于演示和测试，短简报扩写超过 6 张卡时会循环使用模板句式；真实生成质量取决于用户配置的模型。
 - **其他实现细节**：

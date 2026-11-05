@@ -665,17 +665,39 @@ function addAccent(slide: Slide, c: Ctx, card: Card, slot: { x: number; y: numbe
 // ── Header / footer ───────────────────────────────────────────────────────
 
 const HF_KEYS = ['topLeft', 'topCenter', 'topRight', 'bottomLeft', 'bottomCenter', 'bottomRight'] as const;
+/** Logo heights on the 1280-wide canvas, matching CardView. */
+const LOGO_PX = { sm: 24, md: 36, lg: 52, xl: 72 } as const;
 
 function addHeaderFooter(slide: Slide, c: Ctx, hf: HeaderFooter, canvasH: number, cardNumber: number, cardCount: number, deckTitle: string) {
   if ((hf.hideFromFirstCard && cardNumber === 1) || (hf.hideFromLastCard && cardNumber === cardCount)) return;
   const render = (slot?: HeaderFooterSlot) => !slot ? '' : slot.type === 'cardNumber' ? String(cardNumber) : slot.type === 'logo' ? (slot.value || deckTitle || '') : slot.value || '';
   const boxW = CANVAS * 0.4, boxH = 16 * 1.3;
   const fixed: Ctx = { ...c, s: 1 };
+  let usedSlideNumber = false;
   for (const key of HF_KEYS) {
-    const value = render(hf[key]);
-    if (!value) continue;
     const top = key.startsWith('top');
     const align = key.endsWith('Left') ? 'left' : key.endsWith('Right') ? 'right' : 'center';
+    // A logo slot with an uploaded image (report 05 §6: image element, sizes sm–xl); text logo otherwise.
+    const slotDef = hf[key];
+    const logo = slotDef?.type === 'logo' && slotDef.mediaId ? c.media(slotDef.mediaId) : null;
+    if (logo) {
+      const h = LOGO_PX[slotDef?.size || 'md'];
+      const w = logo.w && logo.h ? Math.min(CANVAS * 0.3, h * (logo.w / logo.h)) : h;
+      const x = align === 'left' ? 32 : align === 'right' ? CANVAS - 32 - w : (CANVAS - w) / 2;
+      const y = top ? 20 : canvasH - 20 - h;
+      slide.addImage({ data: logo.data, x: inch(fixed, x), y: inch(fixed, y), w: inch(fixed, w), h: inch(fixed, h), altText: 'Logo', objectName: 'Logo' });
+      continue;
+    }
+    if (slotDef?.type === 'cardNumber' && !usedSlideNumber) {
+      // A native slide-number field: PowerPoint renumbers it and importers recognise it.
+      usedSlideNumber = true;
+      const x = align === 'left' ? 32 : align === 'right' ? CANVAS - 32 - boxW : (CANVAS - boxW) / 2;
+      const y = top ? 24 : canvasH - 24 - boxH;
+      slide.slideNumber = { x: inch(fixed, x), y: inch(fixed, y), w: inch(fixed, boxW), h: inch(fixed, boxH), fontFace: c.fonts.body, fontSize: Math.round(16 * c.ptPerPx * 10) / 10, color: hex(c.theme.colors.muted), align };
+      continue;
+    }
+    const value = render(slotDef);
+    if (!value) continue;
     const x = align === 'left' ? 32 : align === 'right' ? CANVAS - 32 - boxW : (CANVAS - boxW) / 2;
     const y = top ? 24 : canvasH - 24 - boxH;
     addTextBox(slide, fixed, runsOf(fixed, value, { px: 16, color: c.theme.colors.muted, face: c.fonts.body }, false), x, y, boxW, boxH, { align, valign: top ? 'top' : 'middle', lineHeight: 1.2 });

@@ -164,6 +164,33 @@ describe('edits, proposals and versions (report 06)', () => {
   });
 });
 
+describe('express mode and prepared outlines', () => {
+  it('express mode builds straight after the outline (no review stop)', async () => {
+    const { deck } = await engine.createDeck({ settings: { inputText: 'Express topic', numCards: 3, mode: 'express' } });
+    await engine.waitForJobs();
+    const done = store.getDeck(deck.id)!;
+    assert.equal(done.status, 'ready');
+    assert.equal(done.settings.mode, 'express');
+    assert.equal(done.cards.length, done.outline.length);
+  });
+  it('a prepared outline skips the planner and keeps points as written', async () => {
+    const { deck } = await engine.createDeck({
+      settings: { inputText: 'imported', textMode: 'preserve' },
+      title: 'Imported deck',
+      outline: [{ title: 'Cover', points: [] }, { title: 'Results', points: ['Revenue +32%', 'Churn 2.1%'] }, { title: '', points: ['untitled body'] }, { title: ' ', points: [] }],
+      source: { kind: 'import', fileName: 'q3.pptx', intent: 'asIs' },
+    });
+    await engine.waitForJobs();
+    const out = store.getDeck(deck.id)!;
+    assert.equal(out.status, 'outline_ready');
+    assert.equal(out.title, 'Imported deck');
+    assert.deepEqual(out.outline.map(c => c.title), ['Cover', 'Results', 'Card 3']);
+    assert.deepEqual(out.outline[1].points, ['Revenue +32%', 'Churn 2.1%']);
+    assert.deepEqual(out.source, { kind: 'import', fileName: 'q3.pptx', intent: 'asIs' });
+    await assert.rejects(engine.createDeck({ settings: { inputText: 'x' }, outline: [{ title: ' ', points: [] }] }), /no cards/);
+  });
+});
+
 describe('stop, withdraw and retry', () => {
   it('stop keeps finished cards and drops unstarted ones; a queued instruction can be withdrawn', async () => {
     const base = model.createMockModel();

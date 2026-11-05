@@ -53,6 +53,7 @@ export function normalizeSettings(input: Partial<GenerationSettings>, warnings: 
     themeId: getTheme(input.themeId).id,
     format,
     dimensions,
+    mode: input.mode === 'express' ? 'express' : 'plan',
   };
 }
 

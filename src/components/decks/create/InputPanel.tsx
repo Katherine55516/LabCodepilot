@@ -1,7 +1,7 @@
 'use client';
 
-import type { KeyboardEvent } from 'react';
-import { ClipboardText, Sparkle } from '@phosphor-icons/react';
+import type { KeyboardEvent, ReactNode } from 'react';
+import { ClipboardText, FileArrowUp, Sparkle } from '@phosphor-icons/react';
 import type { TextMode } from '@/lib/decks/types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -11,7 +11,7 @@ import { useDecksT } from '../i18n';
 import { Segmented } from './controls';
 import { PASTE_MODES } from './options';
 
-export type InputTab = 'generate' | 'paste';
+export type InputTab = 'generate' | 'paste' | 'import';
 /** Gamma-style input limit (report 03 §1.5: ~400,000 chars). */
 export const INPUT_MAX = 400_000;
 
@@ -29,6 +29,8 @@ interface InputPanelProps {
   sectionCount: number;
   /** Ctrl/Cmd+Enter submits. */
   onSubmitShortcut: () => void;
+  /** Content of the Import tab (ImportPanel). */
+  importContent: ReactNode;
 }
 
 export function InputPanel(props: InputPanelProps) {
@@ -42,6 +44,7 @@ export function InputPanel(props: InputPanelProps) {
       <TabsList className="w-full sm:w-fit">
         <TabsTrigger value="generate"><Sparkle aria-hidden />{t('decks.create.tab.generate')}</TabsTrigger>
         <TabsTrigger value="paste"><ClipboardText aria-hidden />{t('decks.create.tab.paste')}</TabsTrigger>
+        <TabsTrigger value="import"><FileArrowUp aria-hidden />{t('decks.create.tab.import')}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="generate" className="flex flex-col gap-2">
@@ -98,6 +101,8 @@ export function InputPanel(props: InputPanelProps) {
           </div>
         </div>
       </TabsContent>
+
+      <TabsContent value="import">{props.importContent}</TabsContent>
     </Tabs>
   );
 }

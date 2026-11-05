@@ -3,8 +3,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Sparkle } from '@phosphor-icons/react';
-import type { TextMode } from '@/lib/decks/types';
+import { ArrowLeft, FileArrowUp, Lightning, ListChecks, Sparkle } from '@phosphor-icons/react';
+import type { GenerationSettings, ImportIntent, TextMode } from '@/lib/decks/types';
 import { decksApi } from '@/lib/decks/client';
 import { getTheme } from '@/lib/decks/themes';
 import { Button } from '@/components/ui/button';
@@ -13,15 +13,19 @@ import { Spinner } from '@/components/ui/spinner';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { useDecksT } from '../i18n';
 import { ThemePicker } from '../ThemePicker';
-import { Field } from './controls';
+import { Field, RadioCards } from './controls';
+import { ImportPanel } from './ImportPanel';
 import { InputPanel, type InputTab } from './InputPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { DEFAULT_DRAFT, buildSettings, countSections, errorMessage, type SettingsDraft } from './options';
 
+type FlowMode = NonNullable<GenerationSettings['mode']>;
+
 /**
  * Intake + settings (report 02 §5.1 "Intake", report 03 §1–2). Submitting
- * creates the deck and starts the outline job; the deck page then shows the
- * plan streaming in.
+ * creates the deck (or imports a file, report 06 §5) and starts the outline
+ * job; the deck page then shows the plan streaming in. In Express mode
+ * (report 02 §3) the engine starts the build as soon as the outline is ready.
  */
 export function CreateDeckFlow() {
   const t = useDecksT();
@@ -33,23 +37,33 @@ export function CreateDeckFlow() {
   const [splitByBreaks, setSplitByBreaks] = useState(false);
   const [title, setTitle] = useState('');
   const [draft, setDraft] = useState<SettingsDraft>(DEFAULT_DRAFT);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importIntent, setImportIntent] = useState<ImportIntent>('asIs');
+  const [mode, setMode] = useState<FlowMode>('plan');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isPaste = tab === 'paste';
+  const isImport = tab === 'import';
   const textMode: TextMode = isPaste ? pasteMode : 'generate';
   const inputText = (isPaste ? pasted : prompt).trim();
   const sectionCount = useMemo(() => countSections(pasted), [pasted]);
   const split = isPaste && splitByBreaks;
-  const canSubmit = inputText.length > 0 && !submitting;
+  const canSubmit = (isImport ? Boolean(importFile) : inputText.length > 0) && !submitting;
+  const submitLabel = mode === 'express' ? t('decks.create.submitExpress') : isImport ? t('decks.create.submitImport') : t('decks.create.submit');
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
-      const settings = buildSettings(draft, { inputText, textMode, splitByBreaks: split });
-      const { deck } = await decksApi.create({ settings, title: title.trim() || undefined });
+      const { deck } = isImport && importFile
+        ? await decksApi.importFile(importFile, { intent: importIntent, themeId: draft.themeId, mode })
+        : await decksApi.create({
+          settings: { ...buildSettings(draft, { inputText, textMode, splitByBreaks: split }), mode },
+          title: title.trim() || undefined,
+          source: { kind: isPaste ? 'paste' : 'prompt' },
+        });
       router.push(`/decks/${deck.id}`);
     } catch (e) {
       setError(errorMessage(e));
@@ -87,10 +101,13 @@ export function CreateDeckFlow() {
                 onSplitChange={setSplitByBreaks}
                 sectionCount={sectionCount}
                 onSubmitShortcut={() => void submit()}
+                importContent={<ImportPanel file={importFile} onFileChange={setImportFile} intent={importIntent} onIntentChange={setImportIntent} />}
               />
-              <Field label={t('decks.create.deckTitle')} htmlFor="decks-title" className="mt-4">
-                <Input id="decks-title" value={title} maxLength={500} placeholder={t('decks.create.deckTitlePlaceholder')} onChange={event => setTitle(event.target.value)} />
-              </Field>
+              {!isImport && (
+                <Field label={t('decks.create.deckTitle')} htmlFor="decks-title" className="mt-4">
+                  <Input id="decks-title" value={title} maxLength={500} placeholder={t('decks.create.deckTitlePlaceholder')} onChange={event => setTitle(event.target.value)} />
+                </Field>
+              )}
             </section>
 
             <section aria-labelledby="decks-theme-heading" className="flex flex-col gap-3">
@@ -105,13 +122,29 @@ export function CreateDeckFlow() {
           <aside aria-label={t('decks.create.settings')} className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-0 lg:self-start">
             <h2 className="text-sm font-semibold">{t('decks.create.settings')}</h2>
             <div className="rounded-xl border border-border/60 bg-card p-4">
-              <SettingsPanel
-                value={draft}
-                onChange={patch => setDraft(d => ({ ...d, ...patch }))}
-                textMode={textMode}
-                splitByBreaks={split}
-                sectionCount={sectionCount}
+              <RadioCards<FlowMode>
+                name="decks-flow-mode"
+                legend={t('decks.create.flow')}
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: 'plan', icon: <ListChecks className="size-4" />, label: t('decks.create.flow.plan'), description: t('decks.create.flow.plan.hint') },
+                  { value: 'express', icon: <Lightning className="size-4" />, label: t('decks.create.flow.express'), description: t('decks.create.flow.express.hint') },
+                ]}
               />
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card p-4">
+              {isImport ? (
+                <p className="text-sm text-muted-foreground">{t('decks.create.import.settingsNote')}</p>
+              ) : (
+                <SettingsPanel
+                  value={draft}
+                  onChange={patch => setDraft(d => ({ ...d, ...patch }))}
+                  textMode={textMode}
+                  splitByBreaks={split}
+                  sectionCount={sectionCount}
+                />
+              )}
             </div>
           </aside>
         </div>
@@ -121,8 +154,8 @@ export function CreateDeckFlow() {
         {error && <ErrorBanner message={t('decks.create.failed')} description={error} onDismiss={() => setError(null)} className="sm:mr-auto sm:max-w-xl" />}
         <span className="hidden text-xs text-muted-foreground sm:inline">{t('decks.create.shortcut')}</span>
         <Button type="submit" disabled={!canSubmit} className="w-full sm:w-auto">
-          {submitting ? <Spinner /> : <Sparkle weight="fill" aria-hidden />}
-          {submitting ? t('decks.create.submitting') : t('decks.create.submit')}
+          {submitting ? <Spinner /> : isImport ? <FileArrowUp weight="fill" aria-hidden /> : <Sparkle weight="fill" aria-hidden />}
+          {submitting ? t('decks.create.submitting') : submitLabel}
         </Button>
       </footer>
     </form>

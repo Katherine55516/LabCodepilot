@@ -61,7 +61,13 @@ export async function createDeck(req: CreateDeckRequest, deps: { fetchImage?: Pa
   if (urls.length && !text.trim()) throw new EngineError(400, 'Add some text besides the image links.');
   settings = { ...settings, inputText: text };
   const title = (req.title || '').trim().slice(0, 200);
-  let deck = store.insertDeck({ title: title || 'Untitled deck', status: 'outlining', settings, outline: [], cards: [], headerFooter: {}, warnings });
+  const prebuilt = Array.isArray(req.outline) ? req.outline.slice(0, 100).map(card => ({
+    title: String(card?.title || '').trim().slice(0, 200),
+    points: Array.isArray(card?.points) ? card.points.map(p => String(p).trim().slice(0, 800)).filter(Boolean).slice(0, 12) : [],
+  })).filter(card => card.title || card.points.length).map((card, i) => ({ ...card, title: card.title || `Card ${i + 1}` })) : undefined;
+  if (req.outline && !prebuilt?.length) throw new EngineError(400, 'The outline has no cards.');
+  const source = req.source && ['prompt', 'paste', 'import', 'api'].includes(req.source.kind) ? req.source : undefined;
+  let deck = store.insertDeck({ title: title || 'Untitled deck', status: 'outlining', settings, outline: [], cards: [], headerFooter: {}, warnings, ...(source ? { source } : {}) });
   if (urls.length) {
     const { media, skipped } = await rehostInputImages(deck.id, urls, deps.fetchImage);
     deck = store.updateDeck(deck.id, d => {
@@ -69,11 +75,11 @@ export async function createDeck(req: CreateDeckRequest, deps: { fetchImage?: Pa
       if (skipped.length) d.warnings.push({ code: 'image_urls_skipped', message: `${skipped.length} image link${skipped.length > 1 ? 's were' : ' was'} not used: ${skipped.slice(0, 3).join('; ')}${skipped.length > 3 ? '; …' : ''}` });
     });
   }
-  const job = startOutline(deck.id, { keepTitle: Boolean(title) });
+  const job = startOutline(deck.id, { keepTitle: Boolean(title), ...(prebuilt ? { prebuilt: { title: title || prebuilt[0].title, cards: prebuilt } } : {}) });
   return { deck: store.getDeck(deck.id)!, job };
 }
 
-export function startOutline(deckId: string, opts: { instruction?: string; numCards?: number; keepTitle?: boolean } = {}): DeckJob {
+export function startOutline(deckId: string, opts: { instruction?: string; numCards?: number; keepTitle?: boolean; prebuilt?: { title: string; cards: { title: string; points: string[] }[] } } = {}): DeckJob {
   boot();
   const deck = store.getDeck(deckId);
   if (!deck) throw new EngineError(404, 'Deck not found');
@@ -91,7 +97,10 @@ export function startOutline(deckId: string, opts: { instruction?: string; numCa
     const model = await resolveDeckModel();
     const s = current.settings;
     let planned;
-    if (s.cardSplit === 'inputTextBreaks' && s.textMode === 'preserve') {
+    if (opts.prebuilt) {
+      // A prepared outline (import, API): the author's cards as written.
+      planned = opts.prebuilt;
+    } else if (s.cardSplit === 'inputTextBreaks' && s.textMode === 'preserve') {
       // The author wrote the cards; keep their text verbatim (report 03 §2).
       planned = await createMockModel().planOutline(s, s.inputText);
     } else {
@@ -114,6 +123,8 @@ export function startOutline(deckId: string, opts: { instruction?: string; numCa
       if (model.kind === 'mock' && process.env.DECKS_MODEL !== 'mock') d.warnings.push({ code: 'demo_model', message: 'No AI provider is configured, so the offline demo model wrote this deck. Set up a provider in Settings for real generation.' });
     });
     store.updateJob(job.id, { status: 'completed', progress: { ...store.emptyProgress(0), percent: 100 } });
+    // Express mode builds straight away (Gamma 5's Express skips the plan review).
+    if (s.mode === 'express' && !opts.instruction) startBuild(deckId);
   });
   return job;
 }

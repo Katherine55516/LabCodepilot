@@ -22,7 +22,7 @@ export const createStrings = {
 
     // ── Create: page ──
     'decks.create.title': 'New deck',
-    'decks.create.subtitle': 'Describe what you need or paste your content, then review the outline before cards are built',
+    'decks.create.subtitle': 'Describe what you need, paste your content or import a file, then review the outline before cards are built',
     'decks.create.back': 'Back to decks',
     'decks.create.settings': 'Settings',
     'decks.create.submit': 'Generate outline',
@@ -52,6 +52,32 @@ export const createStrings = {
     'decks.create.splitLabel': 'One card per --- section',
     'decks.create.splitDetected': '{n} sections found. When on, the card count follows your sections.',
     'decks.create.splitNone': 'No --- breaks found yet. When on, each section between breaks becomes one card.',
+
+    // ── Create: import + generation mode ──
+    'decks.create.tab.import': 'Import',
+    'decks.create.submitExpress': 'Generate deck',
+    'decks.create.submitImport': 'Import',
+    'decks.create.import.file': 'File to import',
+    'decks.create.import.drop': 'Drop a file here, or choose one',
+    'decks.create.import.dropActive': 'Drop to use this file',
+    'decks.create.import.types': 'PowerPoint (.pptx, .potx), Markdown (.md) or text (.txt), up to 50 MB. Text and speaker notes are read; images and layouts are not.',
+    'decks.create.import.change': 'Choose another file',
+    'decks.create.import.remove': 'Remove file',
+    'decks.create.import.badType': 'This file type cannot be imported. Use .pptx, .potx, .md or .txt.',
+    'decks.create.import.tooLarge': 'The file is larger than 50 MB.',
+    'decks.create.import.intent': 'What should happen with it?',
+    'decks.create.import.intent.asIs': 'Keep as-is',
+    'decks.create.import.intent.asIs.hint': 'One card per slide with your wording unchanged, in the theme you pick below.',
+    'decks.create.import.intent.restyle': 'Restyle with a new theme',
+    'decks.create.import.intent.restyle.hint': 'Same content, a new look: the theme you pick plus matching accent artwork on the cards.',
+    'decks.create.import.intent.condense': 'Condense into a new deck',
+    'decks.create.import.intent.condense.hint': 'The AI writes a shorter deck from your content, about half as many cards.',
+    'decks.create.import.settingsNote': 'For imports, the card count and text follow the option you choose. Pick a theme on the left.',
+    'decks.create.flow': 'Generation',
+    'decks.create.flow.plan': 'Review outline first',
+    'decks.create.flow.plan.hint': 'You check and edit the outline, then start building the cards.',
+    'decks.create.flow.express': 'Generate directly',
+    'decks.create.flow.express.hint': 'Cards are built as soon as the outline is written. You can still edit everything afterwards.',
 
     // ── Create: settings ──
     'decks.create.numCards': 'Number of cards',
@@ -195,7 +221,7 @@ export const createStrings = {
 
     // ── Create: page ──
     'decks.create.title': '新建演示',
-    'decks.create.subtitle': '描述需求或粘贴内容，先审阅大纲，再生成卡片',
+    'decks.create.subtitle': '描述需求、粘贴内容或导入文件，先审阅大纲，再生成卡片',
     'decks.create.back': '返回演示列表',
     'decks.create.settings': '设置',
     'decks.create.submit': '生成大纲',
@@ -225,6 +251,32 @@ export const createStrings = {
     'decks.create.splitLabel': '每个 --- 分段生成一张卡片',
     'decks.create.splitDetected': '检测到 {n} 个分段。开启后卡片数按分段决定。',
     'decks.create.splitNone': '尚未检测到 --- 分隔线。开启后，每两条分隔线之间的内容生成一张卡片。',
+
+    // ── Create: import + generation mode ──
+    'decks.create.tab.import': '导入',
+    'decks.create.submitExpress': '直接生成演示',
+    'decks.create.submitImport': '导入',
+    'decks.create.import.file': '要导入的文件',
+    'decks.create.import.drop': '将文件拖到这里，或点击选择',
+    'decks.create.import.dropActive': '松开即可使用此文件',
+    'decks.create.import.types': 'PowerPoint（.pptx、.potx）、Markdown（.md）或文本（.txt），最大 50 MB。会读取文字和演讲者备注，不读取图片和版式。',
+    'decks.create.import.change': '选择其他文件',
+    'decks.create.import.remove': '移除文件',
+    'decks.create.import.badType': '不支持此文件类型。请使用 .pptx、.potx、.md 或 .txt。',
+    'decks.create.import.tooLarge': '文件超过 50 MB。',
+    'decks.create.import.intent': '如何处理这个文件？',
+    'decks.create.import.intent.asIs': '原样导入',
+    'decks.create.import.intent.asIs.hint': '每页幻灯片生成一张卡片，保留原有文字，使用下方选择的主题。',
+    'decks.create.import.intent.restyle': '换用新主题',
+    'decks.create.import.intent.restyle.hint': '内容不变、换个外观：使用所选主题，并为卡片配上相应的点缀图案。',
+    'decks.create.import.intent.condense': '精简为新演示',
+    'decks.create.import.intent.condense.hint': 'AI 根据你的内容写一份更短的演示，卡片数约为原来的一半。',
+    'decks.create.import.settingsNote': '导入时，卡片数量和文字由所选的处理方式决定。请在左侧选择主题。',
+    'decks.create.flow': '生成方式',
+    'decks.create.flow.plan': '先审阅大纲',
+    'decks.create.flow.plan.hint': '先检查并修改大纲，再开始生成卡片。',
+    'decks.create.flow.express': '直接生成',
+    'decks.create.flow.express.hint': '大纲写好后立即生成卡片，之后仍可随意修改。',
 
     // ── Create: settings ──
     'decks.create.numCards': '卡片数量',

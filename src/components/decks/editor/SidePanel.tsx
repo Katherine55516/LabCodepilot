@@ -1,6 +1,6 @@
 'use client';
 
-import { Layout, NotePencil, Sparkle } from '@phosphor-icons/react';
+import { Layout, NotePencil, Sliders, Sparkle } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,21 +18,24 @@ interface SidePanelProps {
   onSheetOpen: (open: boolean) => void;
 }
 
+const LABELS = { layout: 'decks.editor.tab.layout', card: 'decks.editor.tab.card', block: 'decks.editor.tab.block', ai: 'decks.editor.tab.ai' } as const;
+
 const TABS: { id: PanelTab; icon: React.ReactNode }[] = [
   { id: 'layout', icon: <Layout size={16} /> },
   { id: 'card', icon: <NotePencil size={16} /> },
+  { id: 'block', icon: <Sliders size={16} /> },
   { id: 'ai', icon: <Sparkle size={16} /> },
 ];
 
 /** Right-hand panel on desktop; a tab bar + bottom sheet on phones. */
 export function SidePanel({ tab, onTab, content, mobile, sheetOpen, onSheetOpen }: SidePanelProps) {
   const t = useDecksT();
-  const label = (id: PanelTab) => t(id === 'layout' ? 'decks.editor.tab.layout' : id === 'card' ? 'decks.editor.tab.card' : 'decks.editor.tab.ai');
+  const label = (id: PanelTab) => t(LABELS[id]);
 
   if (mobile) {
     return (
       <>
-        <nav className="grid shrink-0 grid-cols-3 border-t bg-background p-1" aria-label={t('decks.editor.panel')}>
+        <nav className="grid shrink-0 grid-cols-4 border-t bg-background p-1" aria-label={t('decks.editor.panel')}>
           {TABS.map(item => (
             <Button key={item.id} variant="ghost" size="sm" className={cn(tab === item.id && sheetOpen && 'bg-accent')}
               onClick={() => { onTab(item.id); onSheetOpen(true); }}>
@@ -54,11 +57,11 @@ export function SidePanel({ tab, onTab, content, mobile, sheetOpen, onSheetOpen 
   }
 
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-l bg-background" aria-label={t('decks.editor.panel')}>
+    <aside className="flex w-[320px] shrink-0 flex-col border-l bg-background" aria-label={t('decks.editor.panel')} data-decks-side-panel="">
       <Tabs value={tab} onValueChange={v => onTab(v as PanelTab)} className="flex min-h-0 flex-1 flex-col gap-0">
         <div className="border-b px-3 py-2">
           <TabsList className="w-full">
-            {TABS.map(item => <TabsTrigger key={item.id} value={item.id}>{item.icon}{label(item.id)}</TabsTrigger>)}
+            {TABS.map(item => <TabsTrigger key={item.id} value={item.id} className="px-1.5">{item.icon}{label(item.id)}</TabsTrigger>)}
           </TabsList>
         </div>
         {/* forceMount keeps the AI draft and job tracking alive across tab switches. */}

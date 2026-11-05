@@ -6,7 +6,7 @@ import { Sparkle } from '@phosphor-icons/react';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { decksApi } from '@/lib/decks/client';
 import { getTheme } from '@/lib/decks/themes';
-import type { DeckResponse } from '@/lib/decks/types';
+import type { DeckResponse, MediaItem } from '@/lib/decks/types';
 import { useDecksT } from '../i18n';
 import { AiPanel } from './AiPanel';
 import type { BlockAction } from './BlockToolbar';
@@ -16,6 +16,7 @@ import { ExportMenu } from './ExportMenu';
 import { Filmstrip } from './Filmstrip';
 import { HeaderFooterDialog } from './HeaderFooterDialog';
 import { HistoryDialog } from './HistoryDialog';
+import { BlockInspector } from './inspector/BlockInspector';
 import { isTypingTarget, useIsMobile } from './hooks';
 import { LayoutPanel } from './LayoutPanel';
 import { SidePanel } from './SidePanel';
@@ -79,12 +80,21 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
     }
   };
 
+  const openTab = (next: PanelTab) => { setTab(next); if (mobile) setSheetOpen(true); };
   const onBlockAction = (action: BlockAction) => {
+    if (action === 'inspect') { openTab('block'); return; }
     if (action !== 'askAi') { s.blockAction(action); return; }
     s.setScopeKind('block');
-    setTab('ai');
-    if (mobile) setSheetOpen(true);
+    openTab('ai');
     setFocusToken(n => n + 1);
+  };
+
+  /** A freshly uploaded image joins the deck's media list (for the image picker) without a refetch. */
+  const addMedia = (media: MediaItem) => {
+    const current = s.dataRef.current;
+    const next: DeckResponse = { ...current, media: [...(current.media ?? []), media] };
+    s.dataRef.current = next;
+    setData(next);
   };
 
   const restore = async (version: number) => {
@@ -104,7 +114,8 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
   useEffect(() => {
     keyHandler.current = e => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || dialog || isTypingTarget(e.target)) return;
-      if (e.target instanceof HTMLElement && e.target.closest('[role="menu"],[role="dialog"],[role="listbox"],[role="tablist"],[role="radiogroup"],[role="toolbar"]')) return;
+      // The side panel's forms (block inspector) own their keys: Backspace on a focused button must not delete the block.
+      if (e.target instanceof HTMLElement && e.target.closest('[role="menu"],[role="dialog"],[role="listbox"],[role="tablist"],[role="radiogroup"],[role="toolbar"],[data-decks-side-panel]')) return;
       if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); s.goToCard(-1); }
       else if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); s.goToCard(1); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlock && !editRunning) { e.preventDefault(); s.blockAction('delete'); }
@@ -119,11 +130,15 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
 
   const panelContent: Record<PanelTab, React.ReactNode> = {
     layout: card
-      ? <LayoutPanel deckId={deckId} card={card} theme={theme} dimensions={dimensions} onLayout={s.setLayout} runAction={runAction} busy={busy} />
+      ? <LayoutPanel deckId={deckId} card={card} theme={theme} dimensions={dimensions} onLayout={s.setLayout} onApplySuggestion={s.applyCard} runAction={runAction} busy={busy} />
       : <p className="text-sm text-muted-foreground">{t('decks.editor.noCards')}</p>,
     card: card
       ? <CardPanel card={card} onChange={s.setCardFields} />
       : <p className="text-sm text-muted-foreground">{t('decks.editor.noCards')}</p>,
+    block: (
+      <BlockInspector deckId={deckId} block={selectedBlock} media={data.media ?? []} disabled={editRunning}
+        onChange={next => s.changeBlock(next.id, next)} onMediaAdded={addMedia} />
+    ),
     ai: (
       <AiPanel
         deckId={deckId} deckTitle={draft.title} cards={cards} card={card} cardIndex={cardIndex} block={selectedBlock}
@@ -171,7 +186,7 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
         </main>
         <SidePanel tab={tab} onTab={setTab} content={panelContent} mobile={mobile} sheetOpen={sheetOpen} onSheetOpen={setSheetOpen} />
       </div>
-      <HeaderFooterDialog open={dialog === 'hf'} onOpenChange={open => setDialog(open ? 'hf' : null)} value={draft.headerFooter} onSave={s.setHeaderFooter} />
+      <HeaderFooterDialog deckId={deckId} onMediaAdded={addMedia} open={dialog === 'hf'} onOpenChange={open => setDialog(open ? 'hf' : null)} value={draft.headerFooter} onSave={s.setHeaderFooter} />
       <HistoryDialog deckId={deckId} currentVersion={deck.version} open={dialog === 'history'} onOpenChange={open => setDialog(open ? 'history' : null)} onRestore={restore} />
     </div>
   );

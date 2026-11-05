@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   AiEditRequest, CreateDeckRequest, Deck, DeckJob, DeckResponse, DeckSummary, DeckTheme, DeckVersion,
-  MediaItem, SaveDeckRequest, SaveOutlineRequest,
+  GenerationSettings, ImportIntent, MediaItem, SaveDeckRequest, SaveOutlineRequest,
 } from './types';
 
 /** Thin typed client for /api/decks. Errors throw `DecksApiError` with the server's message. */
@@ -28,6 +28,11 @@ export const decksApi = {
   list: () => call<{ decks: DeckSummary[] }>(''),
   themes: () => call<{ themes: DeckTheme[] }>('/themes'),
   create: (body: CreateDeckRequest) => call<{ deck: Deck; job: DeckJob }>('', { method: 'POST', body: json(body) }),
+  /** Raw file bytes to POST /api/decks/import (.pptx, .potx, .md, .txt). */
+  importFile: (file: File, opts: { intent: ImportIntent; themeId?: string; mode?: GenerationSettings['mode'] }) => {
+    const query = new URLSearchParams({ fileName: file.name, intent: opts.intent, ...(opts.themeId ? { themeId: opts.themeId } : {}), ...(opts.mode ? { mode: opts.mode } : {}) });
+    return call<{ deck: Deck; job: DeckJob }>(`/import?${query}`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream' } });
+  },
   get: (id: string) => call<DeckResponse>(`/${id}`),
   save: (id: string, body: SaveDeckRequest) => call<{ deck: Deck }>(`/${id}`, { method: 'PUT', body: json(body) }),
   remove: (id: string) => call<{ ok: true }>(`/${id}`, { method: 'DELETE' }),

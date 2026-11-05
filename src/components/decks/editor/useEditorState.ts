@@ -96,8 +96,15 @@ export function useEditorState(deckId: string, data: DeckResponse, setData: (d: 
     selectBlock(block.id);
   };
 
-  /** Block toolbar actions other than "ask AI", which the editor routes to the AI panel. */
-  const blockAction = (action: Exclude<BlockAction, 'askAi'>) => {
+  /** Replaces the selected card in one immediate save (suggested layouts), so History has one version for it. */
+  const applyCard = (next: Card) => {
+    const updated = cards.map(c => (c.id === next.id ? next : c));
+    commit({ cards: updated }, { cards: updated }, true);
+    if (selectedBlockId && !findBlock(next.blocks, selectedBlockId)) selectBlock(null);
+  };
+
+  /** Block toolbar actions other than "ask AI" and "edit", which the editor routes to the side panel. */
+  const blockAction = (action: Exclude<BlockAction, 'askAi' | 'inspect'>) => {
     if (!card || !selectedBlock) return;
     const id = selectedBlock.id;
     if (action === 'up' || action === 'down') updateBlocks(blocks => shiftBlock(blocks, id, action === 'up' ? -1 : 1));
@@ -113,7 +120,7 @@ export function useEditorState(deckId: string, data: DeckResponse, setData: (d: 
 
   return {
     deck, saver, draft, cards, card, cardIndex, selectedBlock, scopeKind, setScopeKind,
-    selectCard, selectBlock, goToCard, addCard, cardAction, moveCard, changeBlock, insert, blockAction,
+    selectCard, selectBlock, goToCard, addCard, cardAction, moveCard, changeBlock, insert, blockAction, applyCard,
     setLayout: (layout: Card['layout']) => card && updateCard(card.id, c => ({ ...c, layout })),
     setCardFields: (patch: Partial<Pick<Card, 'notes' | 'hidden'>>) => card && updateCard(card.id, c => ({ ...c, ...patch })),
     setTitle: (title: string) => commit({ title }, { title }),

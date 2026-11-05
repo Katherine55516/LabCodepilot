@@ -119,10 +119,23 @@ function Shimmer({ theme }: { theme: DeckTheme }) {
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>{bar('55%', 48)}{bar('90%')}{bar('82%')}{bar('70%')}</div>;
 }
 
-function HeaderFooterLayer({ headerFooter, cardNumber, cardCount, theme, deckTitle }: CardViewProps) {
+/** Logo image height on the 1280 canvas per size (report 05 §6: sm / md / lg / xl, md by default). */
+export const LOGO_HEIGHT: Record<NonNullable<HeaderFooterSlot['size']>, number> = { sm: 24, md: 36, lg: 52, xl: 72 };
+
+function HeaderFooterLayer({ headerFooter, cardNumber, cardCount, theme, deckTitle, mediaUrl }: CardViewProps) {
   if (!headerFooter || !cardNumber) return null;
   if ((headerFooter.hideFromFirstCard && cardNumber === 1) || (headerFooter.hideFromLastCard && cardNumber === cardCount)) return null;
-  const render = (slot?: HeaderFooterSlot) => !slot ? null : slot.type === 'cardNumber' ? String(cardNumber) : slot.type === 'logo' ? (slot.value || deckTitle || '') : slot.value || '';
+  const render = (slot?: HeaderFooterSlot): ReactNode => {
+    if (!slot) return null;
+    if (slot.type === 'cardNumber') return String(cardNumber);
+    if (slot.type !== 'logo') return slot.value || '';
+    if (slot.mediaId && mediaUrl) {
+      const height = LOGO_HEIGHT[slot.size ?? 'md'] ?? LOGO_HEIGHT.md;
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={mediaUrl(slot.mediaId)} alt={slot.value || deckTitle || ''} style={{ height, width: 'auto', maxWidth: 420, objectFit: 'contain', display: 'block' }} />;
+    }
+    return slot.value || deckTitle || '';
+  };
   const pos = (key: keyof HeaderFooter, style: CSSProperties) => {
     const value = render(headerFooter[key] as HeaderFooterSlot | undefined);
     return value ? <div key={key} style={{ position: 'absolute', fontSize: 16, color: theme.colors.muted, zIndex: 2, ...style }}>{value}</div> : null;
@@ -183,7 +196,7 @@ function BlockView(props: CardViewProps & { block: Block }) {
       return wrap(text(block.text, v => change({ ...block, text: v }), { fontSize: 26, lineHeight: 1.5, color: theme.colors.text }));
     case 'bullets': case 'numbered': {
       const Tag = block.type === 'bullets' ? 'ul' : 'ol';
-      return wrap(<Tag style={{ margin: 0, paddingLeft: 34, fontSize: 26, lineHeight: 1.45, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}>
+      return wrap(<Tag style={{ margin: 0, paddingLeft: 34, listStyleType: block.type === 'bullets' ? 'disc' : 'decimal', fontSize: 26, lineHeight: 1.45, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}>
         {block.items.map((item, i) => <li key={i} style={{ paddingLeft: 6 }}>{text(item, v => change({ ...block, items: block.items.map((x, j) => (j === i ? v : x)).filter(Boolean) }))}</li>)}
       </Tag>);
     }

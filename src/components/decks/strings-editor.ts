@@ -1,6 +1,9 @@
+import { inspectorStrings } from './strings-editor-inspector';
+
 /** Decks UI strings for the editor screens. Owner: the editor UI. Every key needs en and zh. */
 export const editorStrings = {
   en: {
+    ...inspectorStrings.en,
     // Top bar
     'decks.editor.back': 'Back to decks',
     'decks.editor.deckTitle': 'Deck title',
@@ -195,6 +198,7 @@ export const editorStrings = {
     'decks.editor.print.preparing': 'Loading images…',
   },
   zh: {
+    ...inspectorStrings.zh,
     'decks.editor.back': '返回演示列表',
     'decks.editor.deckTitle': '演示标题',
     'decks.editor.untitled': '未命名演示',

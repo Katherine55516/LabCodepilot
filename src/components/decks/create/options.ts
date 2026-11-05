@@ -1,5 +1,5 @@
 import type {
-  CardDimensions, DeckFormat, DeckLanguage, GenerationSettings, ImageSource, OutlineCard, TextAmount, TextMode,
+  CardDimensions, DeckFormat, DeckLanguage, GenerationSettings, ImageSource, ImportIntent, OutlineCard, TextAmount, TextMode,
 } from '@/lib/decks/types';
 import { FORMAT_DIMENSIONS, NUM_CARDS_RANGE } from '@/lib/decks/types';
 import { DEFAULT_THEME_ID } from '@/lib/decks/themes';
@@ -111,3 +111,20 @@ export const cleanOutline = (outline: OutlineCard[]): OutlineCard[] =>
 
 /** Message for a failed API call (`DecksApiError.message` carries the server's text). */
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+// ── Import (mirrors src/lib/decks/import.ts, which is server-only) ────────
+
+export const IMPORT_ACCEPT = ['.pptx', '.potx', '.md', '.txt'] as const;
+export const IMPORT_MAX_BYTES = 50 * 1024 * 1024;
+export const IMPORT_INTENT_OPTIONS: ImportIntent[] = ['asIs', 'restyle', 'condense'];
+
+/** Client-side check before upload; the server repeats it. */
+export function importFileProblem(file: { name: string; size: number }): 'badType' | 'tooLarge' | null {
+  const name = file.name.toLowerCase();
+  if (!IMPORT_ACCEPT.some(ext => name.endsWith(ext))) return 'badType';
+  if (file.size > IMPORT_MAX_BYTES) return 'tooLarge';
+  return null;
+}
+
+export const formatBytes = (bytes: number) =>
+  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;

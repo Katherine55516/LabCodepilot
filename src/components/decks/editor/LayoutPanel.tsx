@@ -10,6 +10,7 @@ import type { AccentPosition, Card, CardDimensions, CardLayout, DeckTheme } from
 import { cn } from '@/lib/utils';
 import { CardView } from '../CardView';
 import { useDecksT, type DecksStringKey } from '../i18n';
+import { SuggestedLayouts } from './SuggestedLayouts';
 import type { RunAction } from './types';
 
 const POSITIONS: AccentPosition[] = ['none', 'left', 'right', 'top', 'background'];
@@ -20,15 +21,18 @@ interface LayoutPanelProps {
   theme: DeckTheme;
   dimensions: CardDimensions;
   onLayout: (layout: CardLayout) => void;
+  /** Applies a suggested layout: the same card with its content rearranged. */
+  onApplySuggestion: (next: Card) => void;
   runAction: RunAction;
   busy: string | null;
 }
 
 /**
  * Standard layouts as live previews of this card (report 04 §2.2: same
- * content, different accent position), accent image actions and alignment.
+ * content, different accent position), suggested layouts (the content
+ * rearranged), accent image actions and alignment.
  */
-export function LayoutPanel({ deckId, card, theme, dimensions, onLayout, runAction, busy }: LayoutPanelProps) {
+export function LayoutPanel({ deckId, card, theme, dimensions, onLayout, onApplySuggestion, runAction, busy }: LayoutPanelProps) {
   const t = useDecksT();
   const [url, setUrl] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -76,6 +80,8 @@ export function LayoutPanel({ deckId, card, theme, dimensions, onLayout, runActi
           })}
         </div>
       </section>
+
+      <SuggestedLayouts card={card} theme={theme} dimensions={dimensions} onApply={onApplySuggestion} disabled={busy !== null} />
 
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-medium text-muted-foreground">{t('decks.editor.layout.image')}</h3>

@@ -10,5 +10,5 @@ export type ActionResult = void | (Partial<Pick<DeckResponse, 'deck' | 'job' | '
  */
 export type RunAction = (key: string, fn: () => Promise<ActionResult>) => Promise<boolean>;
 
-export type PanelTab = 'layout' | 'card' | 'ai';
+export type PanelTab = 'layout' | 'card' | 'block' | 'ai';
 export type AiScopeKind = 'deck' | 'card' | 'block';

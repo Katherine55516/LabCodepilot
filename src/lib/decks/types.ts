@@ -63,6 +63,8 @@ export interface GenerationSettings {
   themeId: string;
   format: DeckFormat;
   dimensions: CardDimensions;
+  /** Gamma 5 offers Plan (review the outline first) and Express (build straight away) (report 02 §3). */
+  mode?: 'plan' | 'express';
 }
 
 export const NUM_CARDS_RANGE = { min: 1, max: 60 } as const;
@@ -130,7 +132,8 @@ export interface OutlineCard {
 
 export type DeckStatus = 'outlining' | 'outline_ready' | 'generating' | 'ready' | 'failed';
 
-export interface HeaderFooterSlot { type: 'text' | 'cardNumber' | 'logo'; value?: string }
+/** Header/footer slot (report 05 §6): text, card number, or a logo image (an uploaded mediaId, else text). */
+export interface HeaderFooterSlot { type: 'text' | 'cardNumber' | 'logo'; value?: string; mediaId?: string; size?: 'sm' | 'md' | 'lg' | 'xl' }
 export interface HeaderFooter {
   topLeft?: HeaderFooterSlot; topCenter?: HeaderFooterSlot; topRight?: HeaderFooterSlot;
   bottomLeft?: HeaderFooterSlot; bottomCenter?: HeaderFooterSlot; bottomRight?: HeaderFooterSlot;
@@ -153,12 +156,18 @@ export interface Deck {
   inputMediaIds?: string[];
   /** Which model wrote the deck: 'provider' or the offline 'mock' demo model. */
   model?: 'provider' | 'mock';
+  /** Where the content came from (report 06 §4 import intents). */
+  source?: DeckSource;
   error?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DeckWarning { code: string; message: string }
+
+export interface DeckSource { kind: 'prompt' | 'paste' | 'import' | 'api'; fileName?: string; intent?: ImportIntent }
+/** What to do with an imported deck (report 06 §4): keep it as-is, restyle it, or condense it into a new deck. */
+export type ImportIntent = 'asIs' | 'restyle' | 'condense';
 
 export interface DeckSummary {
   id: string; title: string; status: DeckStatus; themeId: string; dimensions: CardDimensions; cardCount: number;
@@ -250,7 +259,13 @@ export interface DeckTheme {
 // ── API shapes (src/app/api/decks/**) ─────────────────────────────────────
 
 /** POST /api/decks → 201 { deck, job } */
-export interface CreateDeckRequest { settings: Partial<GenerationSettings> & { inputText: string }; title?: string }
+export interface CreateDeckRequest {
+  settings: Partial<GenerationSettings> & { inputText: string };
+  title?: string;
+  /** A prepared outline (imports, API inputTextBreaks): skips the planner; each card keeps its points as written. */
+  outline?: { title: string; points: string[] }[];
+  source?: DeckSource;
+}
 /** GET /api/decks → { decks: DeckSummary[] } ; GET /api/decks/:id → { deck, job?, proposals } */
 export interface DeckResponse { deck: Deck; job?: DeckJob; proposals: EditProposal[]; media: MediaItem[] }
 /** PUT /api/decks/:id/outline { outline, settings? } → { deck } (only while outline_ready) */
