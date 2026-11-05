@@ -7,7 +7,7 @@ import { ArrowLeft, Printer } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { decksApi, mediaUrl } from '@/lib/decks/client';
-import { getTheme } from '@/lib/decks/themes';
+import { deckTheme } from '@/lib/decks/themes';
 import type { CardDimensions, DeckResponse } from '@/lib/decks/types';
 import { CardView } from '../CardView';
 import { useDecksT } from '../i18n';
@@ -111,7 +111,7 @@ export function PrintView({ deckId }: { deckId: string }) {
               style={{ width: page.width, height: page.height ?? undefined, breakAfter: !flow && i < cards.length - 1 ? 'page' : 'auto', breakInside: 'avoid' }}
             >
               <CardView
-                card={card} theme={getTheme(deck.settings.themeId)} dimensions={deck.settings.dimensions} mediaUrl={mediaUrl} width={page.width}
+                card={card} theme={deckTheme(deck)} dimensions={deck.settings.dimensions} mediaUrl={mediaUrl} width={page.width}
                 cardNumber={i + 1} cardCount={cards.length} headerFooter={deck.headerFooter} deckTitle={deck.title}
               />
             </div>

@@ -15,7 +15,7 @@ import { BLOCK_GROUPS } from './block-defaults';
 export const BLOCK_ICONS: Record<BlockType, Icon> = {
   heading: TextH, paragraph: TextAa, bullets: ListBullets, numbered: ListNumbers, image: ImageIcon, table: Table,
   chart: ChartBar, callout: Info, quote: Quotes, code: Code, timeline: Path, steps: Footprints, metrics: SquaresFour,
-  grid: GridFour, columns: Columns, divider: Minus,
+  grid: GridFour, columns: Columns, divider: Minus, templateDiagram: GridFour,
 };
 
 export function InsertBlockMenu({ onInsert, disabled }: { onInsert: (type: BlockType) => void; disabled?: boolean }) {

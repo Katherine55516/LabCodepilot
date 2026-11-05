@@ -9,12 +9,12 @@ import { CardView } from './CardView';
 import { useDecksT } from './i18n';
 
 /** A theme gallery: each tile is a real card rendered with that theme (heading + bullets + accent on the right). */
-export function ThemePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+export function ThemePicker({ value, onChange, extra = [] }: { value: string; onChange: (id: string) => void; /** e.g. the theme read from an imported template */ extra?: DeckTheme[] }) {
   const t = useDecksT();
   const bullets = [t('decks.theme.sampleBullet1'), t('decks.theme.sampleBullet2')];
   return (
     <div role="radiogroup" aria-label={t('decks.theme.label')} className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {DECK_THEMES.map(theme => (
+      {[...extra, ...DECK_THEMES].map(theme => (
         <ThemeTile key={theme.id} theme={theme} bullets={bullets} selected={theme.id === value} onSelect={() => onChange(theme.id)} />
       ))}
     </div>

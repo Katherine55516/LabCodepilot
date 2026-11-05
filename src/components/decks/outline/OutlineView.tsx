@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { ArrowsMerge, Check, Plus, Sparkle, WarningCircle } from '@phosphor-icons/react';
 import type { DeckResponse } from '@/lib/decks/types';
 import { decksApi } from '@/lib/decks/client';
-import { getTheme } from '@/lib/decks/themes';
+import { themeFor } from '@/lib/decks/themes';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorBanner } from '@/components/ui/error-banner';
@@ -72,7 +72,7 @@ function EditableOutline({ deckId, data, refresh }: OutlineViewProps) {
   const [themeOpen, setThemeOpen] = useState(false);
   const [busy, setBusy] = useState<'generate' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const theme = getTheme(look.themeId);
+  const theme = themeFor(look.themeId, deck.template);
   const n = outline.length;
   const byBreaks = deck.settings.cardSplit === 'inputTextBreaks';
   const target = deck.settings.numCards;
@@ -122,7 +122,7 @@ function EditableOutline({ deckId, data, refresh }: OutlineViewProps) {
               </DialogTrigger>
               <DialogContent className="sm:max-w-3xl">
                 <DialogHeader><DialogTitle>{t('decks.theme.label')}</DialogTitle></DialogHeader>
-                <ThemePicker value={look.themeId} onChange={themeId => { updateLook({ themeId }); setThemeOpen(false); }} />
+                <ThemePicker extra={deck.template ? [deck.template.theme] : []} value={look.themeId} onChange={themeId => { updateLook({ themeId }); setThemeOpen(false); }} />
               </DialogContent>
             </Dialog>
             <ImageSourceField compact id="decks-outline-image-source" value={look.imageSource} onChange={imageSource => updateLook({ imageSource })} />

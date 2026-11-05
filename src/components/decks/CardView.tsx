@@ -5,6 +5,7 @@ import type { Block, Card, CardDimensions, DeckTheme, HeaderFooter, HeaderFooter
 import { DIMENSION_RATIO } from '@/lib/decks/types';
 import { parseInline } from '@/lib/decks/blocks';
 import { accentDataUrl } from '@/lib/decks/accent-art';
+import { arrangeComponent, canArrange } from '@/lib/decks/component-layout';
 
 /** Logical canvas width; Gamma's editor measured a 1280×720 canvas (report 01 §2.2). */
 export const CANVAS_WIDTH = 1280;
@@ -83,22 +84,32 @@ function CardCanvas(props: CardViewProps) {
   const accent = card.layout.accent;
   const accentSrc = accent === 'none' ? undefined : card.layout.accentMediaId && mediaUrl ? mediaUrl(card.layout.accentMediaId) : accentDataUrl(theme, card.layout.accentSeed || card.id);
   const fixed = canvasHeight(dimensions) !== null;
+  const band = card.layout.band;
   const base: CSSProperties = {
-    width: '100%', height: fixed ? '100%' : undefined, minHeight: fixed ? undefined : 720,
+    width: '100%', height: fixed ? (band ? `${(1 - band.size) * 100}%` : '100%') : undefined, minHeight: fixed ? undefined : band ? 720 * (1 - band.size) : 720,
     background: theme.colors.background, color: theme.colors.text, fontFamily: theme.fonts.body,
     display: 'flex', flexDirection: accent === 'top' ? 'column' : accent === 'right' ? 'row-reverse' : 'row', position: 'relative',
   };
   const content = (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: accent === 'background' ? '72px 96px' : '64px 80px', display: 'flex', flexDirection: 'column', justifyContent: fixed ? 'center' : 'flex-start', gap: 20, textAlign: card.layout.align, position: 'relative', zIndex: 1 }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: accent === 'background' ? '72px 96px' : '64px 80px', display: 'flex', flexDirection: 'column', justifyContent: fixed ? 'safe center' : 'flex-start', gap: 20, textAlign: card.layout.align, position: 'relative', zIndex: 1 }}>
       {props.pending && card.blocks.length === 0 ? <Shimmer theme={theme} /> : card.blocks.map(block => <BlockView key={block.id} block={block} {...props} />)}
     </div>
   );
-  return (
+  const share = Math.round((card.layout.accentSize ?? (accent === 'top' ? 0.38 : 0.4)) * 1000) / 10;
+  const contain = card.layout.accentFit === 'contain' && Boolean(card.layout.accentMediaId);
+  const bandEl = band && mediaUrl ? (
+    <div data-template-band={band.position} style={{ height: fixed ? `${band.size * 100}%` : 720 * band.size, overflow: 'hidden', flex: '0 0 auto' }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={mediaUrl(band.mediaId)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </div>
+  ) : null;
+  const body = (
     <div style={base}>
       {accentSrc && accent !== 'background' && (
-        <div style={{ flex: accent === 'top' ? '0 0 38%' : '0 0 40%', position: 'relative', overflow: 'hidden' }}>
+        <div data-accent-slot={accent} style={{ flex: `0 0 ${share}%`, position: 'relative', overflow: 'hidden', ...(contain ? { background: theme.colors.surface, display: 'flex', flexDirection: 'column', padding: accent === 'top' ? '20px 80px 8px' : '40px 28px', boxSizing: 'border-box', gap: 10 } : {}) }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={accentSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <img src={accentSrc} alt={contain ? card.layout.accentCaption || '' : ''} style={contain ? { flex: 1, minHeight: 0, width: '100%', objectFit: 'contain', display: 'block' } : { width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          {contain && card.layout.accentCaption && <div style={{ fontSize: 15, lineHeight: 1.35, color: theme.colors.muted, flex: '0 0 auto' }}>{card.layout.accentCaption}</div>}
         </div>
       )}
       {accentSrc && accent === 'background' && (
@@ -109,6 +120,16 @@ function CardCanvas(props: CardViewProps) {
         </>
       )}
       {content}
+      {!bandEl && <HeaderFooterLayer {...props} />}
+    </div>
+  );
+  if (!bandEl) return body;
+  // A template-art band above or below the card body (header/footer stay on the whole card).
+  return (
+    <div style={{ width: '100%', height: fixed ? '100%' : undefined, display: 'flex', flexDirection: 'column', position: 'relative', background: theme.colors.background }}>
+      {band!.position === 'top' && bandEl}
+      {body}
+      {band!.position === 'bottom' && bandEl}
       <HeaderFooterLayer {...props} />
     </div>
   );
@@ -268,13 +289,15 @@ function BlockView(props: CardViewProps & { block: Block }) {
       return wrap(<figure style={{ margin: 0 }}>
         {src
           // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={src} alt={block.alt} style={{ width: '100%', maxHeight: 420, objectFit: block.fit, borderRadius: theme.radius, display: 'block' }} />
+          ? <img src={src} alt={block.alt} style={{ width: '100%', maxHeight: block.height ?? 420, height: block.height && block.fit === 'contain' ? block.height : undefined, objectFit: block.fit, borderRadius: theme.radius, display: 'block' }} />
           : <div style={{ height: 300, borderRadius: theme.radius, border: `2px dashed ${theme.colors.border}`, display: 'grid', placeItems: 'center', color: theme.colors.muted, fontSize: 20 }}>{block.alt || 'Image'}</div>}
-        {block.caption && <figcaption style={{ fontSize: 18, color: theme.colors.muted, marginTop: 8 }}>{block.caption}</figcaption>}
+        {block.caption && <figcaption style={{ fontSize: block.height ? 15 : 18, lineHeight: 1.35, color: theme.colors.muted, marginTop: 8 }}>{block.caption}</figcaption>}
       </figure>);
     }
     case 'divider':
       return wrap(<hr style={{ border: 0, height: 2, background: theme.colors.border, margin: '4px 0' }} />);
+    case 'templateDiagram':
+      return wrap(<TemplateDiagramView block={block} theme={theme} mediaUrl={props.mediaUrl} />);
   }
 }
 
@@ -314,4 +337,77 @@ function ChartView({ block, theme }: { block: Extract<Block, { type: 'chart' }>;
       : block.series.map((s, si) => <polyline key={si} fill="none" stroke={palette[si % palette.length]} strokeWidth="5" strokeLinejoin="round" points={s.values.map((v, i) => `${pad + slot * i + slot / 2},${y(v)}`).join(' ')} />)}
     {block.series.length > 1 && block.series.map((s, si) => <g key={si} transform={`translate(${pad + si * 200}, 10)`}><rect width="18" height="18" rx="3" fill={palette[si % palette.length]} /><text x="26" y="16" fontSize="18" fill={theme.colors.text}>{s.name}</text></g>)}
   </svg>;
+}
+
+/**
+ * A template diagram component: its pictures/shapes at their relative
+ * positions and the items in the template's text slots. Sized to the column
+ * width and the component's shape (≤ 400 px tall); text scales with the box
+ * (container query units), so it matches the PPTX export.
+ */
+function TemplateDiagramView({ block, theme, mediaUrl }: { block: Extract<Block, { type: 'templateDiagram' }>; theme: DeckTheme; mediaUrl?: (id: string) => string }) {
+  const found = theme.components?.find(c => c.id === block.componentId);
+  // A component that cannot hold this many items is never stretched or truncated: the items show as a grid.
+  const comp = found && canArrange(found, block.items.length) ? found : undefined;
+  if (!comp) {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(3, block.items.length)}, 1fr)`, gap: 16 }}>
+        {block.items.map((item, i) => <div key={i}><div style={{ fontWeight: 700, fontSize: 22 }}>{item.title}</div>{item.text && <div style={{ fontSize: 18, color: theme.colors.muted }}>{item.text}</div>}</div>)}
+      </div>
+    );
+  }
+  const pct = (v: number) => `${v * 100}%`;
+  const arranged = arrangeComponent(comp, block.items.length, block.items);
+  // 1 template pt → this many % of the component width (the width grows with added units).
+  const cqw = 100 / (comp.slideWidthPt * comp.box.w) / arranged.widthScale;
+  return (
+    <div style={{ width: '100%', maxWidth: Math.round((comp.kind === 'column' || arranged.aspect < comp.aspect * 0.9 ? 520 : 400) * arranged.aspect), margin: '0 auto', containerType: 'inline-size' }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: String(arranged.aspect) }}>
+        {arranged.layers.map((layer, i) => {
+          const box: CSSProperties = { position: 'absolute', left: pct(layer.x), top: pct(layer.y), width: pct(layer.w), height: pct(layer.h) };
+          if (layer.type === 'image') {
+            // An item's picture slot shows the item's figure when it has one (whole, on the slot's box).
+            const figure = layer.slot && layer.unit !== undefined ? block.items[layer.unit]?.mediaId : undefined;
+            const src = figure || layer.mediaId;
+            if (src && mediaUrl && layer.clip) {
+              // A motif continuation: only the clipped part of the picture shows.
+              const c = layer.clip;
+              return (
+                <div key={i} style={{ position: 'absolute', overflow: 'hidden', left: pct(layer.x + layer.w * c.x0), top: pct(layer.y + layer.h * c.y0), width: pct(layer.w * (c.x1 - c.x0)), height: pct(layer.h * (c.y1 - c.y0)) }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={mediaUrl(src)} alt="" style={{ position: 'absolute', left: `${(-c.x0 / (c.x1 - c.x0)) * 100}%`, top: `${(-c.y0 / (c.y1 - c.y0)) * 100}%`, width: `${100 / (c.x1 - c.x0)}%`, height: `${100 / (c.y1 - c.y0)}%`, maxWidth: 'none', maxHeight: 'none', objectFit: 'fill', transform: layer.flip === 'x' ? 'scaleX(-1)' : layer.flip === 'y' ? 'scaleY(-1)' : undefined }} />
+                </div>
+              );
+            }
+            // eslint-disable-next-line @next/next/no-img-element
+            return src && mediaUrl ? <img key={i} src={mediaUrl(src)} alt="" style={{ ...box, objectFit: figure ? 'contain' : layer.slot ? 'cover' : 'fill', background: figure ? '#fff' : undefined, borderRadius: layer.slot ? 8 : 0 }} /> : null;
+          }
+          if (layer.type === 'line') {
+            const vertical = layer.h > layer.w;
+            return <div key={i} style={{ ...box, ...(vertical ? { borderLeft: `${Math.max(1, layer.strokeWidth)}px solid ${layer.stroke}`, width: 0 } : { borderTop: `${Math.max(1, layer.strokeWidth)}px solid ${layer.stroke}`, height: 0 }) }} />;
+          }
+          return <div key={i} style={{ ...box, background: layer.fill ? hexAlpha(layer.fill, layer.fillAlpha ?? 1) : undefined, border: layer.stroke ? `${Math.max(1, layer.strokeWidth || 1)}px solid ${layer.stroke}` : undefined, borderRadius: layer.geom === 'ellipse' ? '50%' : layer.geom === 'roundRect' ? '20%' : 0 }} />;
+        })}
+        {arranged.slots.map((slot, i) => {
+          const item = block.items[slot.unit];
+          const value = slot.role === 'number' ? (/^\s*0\d/.test(slot.sample) ? String(slot.unit + 1).padStart(2, '0') : String(slot.unit + 1)) : slot.role === 'title' ? item?.title : item?.text;
+          if (!value) return null;
+          return (
+            <div key={i} style={{
+              position: 'absolute', left: pct(slot.x), top: pct(slot.y), width: pct(slot.w), minHeight: pct(slot.h), display: 'flex', flexDirection: 'column',
+              justifyContent: slot.anchor === 'ctr' ? 'center' : slot.anchor === 'b' ? 'flex-end' : 'flex-start', textAlign: slot.align === 'ctr' ? 'center' : slot.align === 'r' ? 'right' : 'left',
+              fontSize: `${slot.size * cqw}cqw`, lineHeight: 1.15, color: slot.color || theme.colors.text, fontWeight: slot.bold ? 700 : slot.role === 'body' ? 400 : 600,
+              fontFamily: slot.role === 'body' ? theme.fonts.body : theme.fonts.heading, whiteSpace: slot.role === 'number' ? 'nowrap' : 'normal',
+            }}>{slot.role === 'number' ? value : <Inline text={value} theme={theme} />}</div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function hexAlpha(hex: string, alpha: number): string {
+  if (alpha >= 1) return hex;
+  const h = hex.replace('#', '');
+  return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${alpha})`;
 }

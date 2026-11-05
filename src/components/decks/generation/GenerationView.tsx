@@ -5,7 +5,7 @@ import { Stop } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import type { Card, CardStage, DeckJob, DeckResponse } from '@/lib/decks/types';
 import { decksApi, mediaUrl } from '@/lib/decks/client';
-import { getTheme } from '@/lib/decks/themes';
+import { deckTheme } from '@/lib/decks/themes';
 import { cardTitle } from '@/lib/decks/blocks';
 import { cn } from '@/lib/utils';
 import { CardView } from '../CardView';
@@ -34,7 +34,7 @@ function stageCounts(cards: Card[], job?: DeckJob): Record<CardStage, number> {
 export function GenerationView({ deckId, data, setData }: GenerationViewProps) {
   const t = useDecksT();
   const { deck, job } = data;
-  const theme = getTheme(deck.settings.themeId);
+  const theme = deckTheme(deck);
   const counts = useMemo(() => stageCounts(deck.cards, job), [deck.cards, job]);
   const total = job?.progress.total || deck.cards.length || deck.outline.length;
   const done = job?.progress.done ?? counts.done;

@@ -50,6 +50,7 @@ export function blockText(block: Block): string {
     case 'metrics': return block.items.map(i => `${i.value} ${i.label} ${i.detail || ''}`).join(' ');
     case 'columns': return block.columns.flat().map(blockText).join(' ');
     case 'image': return [block.alt, block.caption].filter(Boolean).join(' ');
+    case 'templateDiagram': return block.items.map(i => `${i.title} ${plainText(i.text || '')}`).join(' ');
     case 'divider': return '';
   }
 }
@@ -86,7 +87,10 @@ export function blockLoad(block: Block, columnFraction = 1): number {
     case 'metrics': return 4.5;
     case 'grid': return Math.ceil(block.items.length / 3) * 4.5;
     case 'columns': return Math.max(...block.columns.map(col => col.reduce((s, b) => s + blockLoad(b, columnFraction / block.columns.length), 0)), 1);
-    case 'image': return 10;
+    case 'image': return block.height ? (block.height + (block.caption ? 52 : 0)) / 28 : 10;
+    // Drawn at the column width and the component's shape, at most 400 px tall.
+    // Drawn at the column width and the component's shape; columns grow with their items' text.
+    case 'templateDiagram': return Math.max(Math.min(400, (1120 * columnFraction) / 2.6) / 28, block.items.reduce((sum, i) => sum + 1.3 + visualLength(plainText(i.text || '')) / (70 * columnFraction), 0)) + 0.6;
     case 'divider': return 0.6;
   }
 }
@@ -96,12 +100,13 @@ export function cardCapacity(dimensions: CardDimensions, layout: CardLayout): nu
   const base: Partial<Record<CardDimensions, number>> = { '16x9': 21, '4x3': 27, '1x1': 33, '4x5': 40, '9x16': 52, a4: 62, letter: 58 };
   const lines = base[dimensions];
   if (lines === undefined) return null; // fluid / pageless grow with content
-  if (layout.accent === 'top') return Math.round(lines * 0.62);
-  return lines;
+  const band = layout.band ? 1 - layout.band.size : 1;
+  if (layout.accent === 'top') return Math.round(lines * band * (1 - (layout.accentSize ?? 0.38)));
+  return Math.round(lines * band);
 }
 
 export function cardLoad(card: Pick<Card, 'blocks' | 'layout'>): number {
-  const fraction = card.layout.accent === 'left' || card.layout.accent === 'right' ? 0.6 : 1;
+  const fraction = card.layout.accent === 'left' || card.layout.accent === 'right' ? 1 - (card.layout.accentSize ?? 0.4) : 1;
   return card.blocks.reduce((sum, block) => sum + blockLoad(block, fraction), 0);
 }
 
@@ -161,7 +166,14 @@ export function sanitizeBlocks(input: unknown, depth = 0): Block[] {
       }
       case 'image': {
         const mediaId = typeof b.mediaId === 'string' && /^[\w-]{1,60}$/.test(b.mediaId) ? b.mediaId : undefined;
-        out.push({ id, type: 'image', alt: str(b.alt, 200), fit: b.fit === 'contain' ? 'contain' : 'cover', ...(mediaId ? { mediaId } : { placeholder: true }), ...(str(b.caption, 200) ? { caption: str(b.caption, 200) } : {}) });
+        const height = Number(b.height);
+        out.push({ id, type: 'image', alt: str(b.alt, 200), fit: b.fit === 'contain' ? 'contain' : 'cover', ...(mediaId ? { mediaId } : { placeholder: true }), ...(str(b.caption, 200) ? { caption: str(b.caption, 200) } : {}), ...(Number.isFinite(height) && height >= 80 && height <= 900 ? { height: Math.round(height) } : {}) });
+        break;
+      }
+      case 'templateDiagram': {
+        const componentId = typeof b.componentId === 'string' && /^K\d{1,3}$/.test(b.componentId) ? b.componentId : '';
+        const items = Array.isArray(b.items) ? b.items.slice(0, 8).map(i => { const o = (i || {}) as Record<string, unknown>; return { title: str(o.title, 120), ...(str(o.text, 400) ? { text: str(o.text, 400) } : {}), ...(typeof o.mediaId === 'string' && /^[\w-]{1,60}$/.test(o.mediaId) ? { mediaId: o.mediaId } : {}) }; }).filter(i => i.title) : [];
+        if (componentId && items.length >= 2) out.push({ id, type: 'templateDiagram', componentId, items });
         break;
       }
       case 'divider': out.push({ id, type: 'divider' }); break;

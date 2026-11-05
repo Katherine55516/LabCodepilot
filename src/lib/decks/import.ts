@@ -30,7 +30,7 @@ const cap = (text: string, max: number) => (text.length > max ? `${text.slice(0,
 export async function parsePresentation(bytes: Buffer, fileName: string): Promise<ParsedPresentation> {
   const ext = extensionOf(fileName);
   if (!(IMPORT_EXTENSIONS as readonly string[]).includes(ext)) {
-    const hint = ext === '.pdf' || ext === '.ppt' || ext === '.key' || ext === '.odp' ? ` Save it as .pptx first.` : '';
+    const hint = ext === '.ppt' || ext === '.key' || ext === '.odp' ? ` Save it as .pptx first.` : '';
     throw new ImportError(415, `${ext ? `${ext} files` : 'Files without an extension'} cannot be imported. Use .pptx, .potx, .md or .txt.${hint}`, 'import_unsupported_type');
   }
   if (bytes.length > MAX_IMPORT_BYTES) throw new ImportError(413, 'The file is larger than 50 MB.', 'import_too_large');

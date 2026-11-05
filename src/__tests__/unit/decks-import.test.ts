@@ -136,7 +136,8 @@ describe('parsePresentation: rejections', () => {
     assert.rejects(parsePresentation(bytes, name), (error: unknown) => error instanceof ImportError && error.status === status && pattern.test(error.message));
 
   it('rejects unsupported types', async () => {
-    await rejects(Buffer.from('%PDF-1.7'), 'deck.pdf', 415, /\.pdf files cannot be imported.*Save it as \.pptx/);
+    // PDFs are read as long sources by the import route (source-import.ts), not by parsePresentation.
+    await rejects(Buffer.from('%PDF-1.7'), 'deck.pdf', 415, /\.pdf files cannot be imported/);
     await rejects(Buffer.from('x'), 'deck.docx', 415, /Use \.pptx, \.potx, \.md or \.txt/);
     await rejects(Buffer.from('x'), 'noext', 415, /without an extension/);
   });

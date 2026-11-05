@@ -33,17 +33,22 @@ export function decodeXml(value: string): string {
   });
 }
 
-const attr = (tag: string, name: string) => {
+export const attr = (tag: string, name: string) => {
   const match = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`).exec(tag);
   return match ? decodeXml(match[2] ?? match[3] ?? '') : undefined;
 };
 
 /** Reads one part as UTF-8, stopping (with an error) once it passes the caps. */
-class PartReader {
+export class PartReader {
   private total = 0;
   constructor(private zip: JSZip) {}
   has(name: string) { return Boolean(this.zip.file(name)); }
   async read(name: string): Promise<string | null> {
+    const buf = await this.readBinary(name);
+    return buf ? buf.toString('utf8') : null;
+  }
+  /** Raw bytes of one part (media), under the same caps. */
+  async readBinary(name: string): Promise<Buffer | null> {
     const file = this.zip.file(name);
     if (!file || file.dir) return null;
     const chunks: Buffer[] = [];
@@ -64,12 +69,12 @@ class PartReader {
       stream.on('error', (error: Error) => reject(new ImportError(400, `The presentation could not be read (${error.message}).`, 'import_unreadable')));
       stream.on('end', () => resolve());
     });
-    return Buffer.concat(chunks).toString('utf8');
+    return Buffer.concat(chunks);
   }
 }
 
 /** `{ Id → Target }` for internal relationships, with targets resolved to zip paths. */
-function relationships(xml: string, baseDir: string): { id: string; type: string; target: string }[] {
+export function relationships(xml: string, baseDir: string): { id: string; type: string; target: string }[] {
   const out: { id: string; type: string; target: string }[] = [];
   for (const [tag] of xml.matchAll(/<Relationship\b[^>]*>/g)) {
     if ((attr(tag, 'TargetMode') || '').toLowerCase() === 'external') continue;

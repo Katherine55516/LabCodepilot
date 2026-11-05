@@ -9,6 +9,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { ThemePicker } from '../ThemePicker';
 import { useDecksT } from '../i18n';
 import type { SaveStatus } from './useDeckSaver';
+import type { DeckTheme } from '@/lib/decks/types';
 
 export interface TopBarProps {
   title: string;
@@ -19,6 +20,8 @@ export interface TopBarProps {
   onRetry: () => void;
   themeId: string;
   onTheme: (id: string) => void;
+  /** Themes beyond the built-ins (an imported template's theme). */
+  extraThemes?: DeckTheme[];
   onOpenHeaderFooter: () => void;
   onOpenHistory: () => void;
   onPresent: () => void;
@@ -77,7 +80,7 @@ export function TopBar(props: TopBarProps) {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="max-h-[70vh] w-[min(92vw,420px)] overflow-y-auto">
-            <ThemePicker value={props.themeId} onChange={props.onTheme} />
+            <ThemePicker extra={props.extraThemes} value={props.themeId} onChange={props.onTheme} />
           </PopoverContent>
         </Popover>
         <Button variant="ghost" size="sm" onClick={props.onOpenHeaderFooter} aria-label={t('decks.editor.headerFooter')} title={t('decks.editor.headerFooter')}>

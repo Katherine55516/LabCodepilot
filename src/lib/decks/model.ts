@@ -1,4 +1,6 @@
-import { cardPrompt, editPrompt, outlinePrompt } from './prompts';
+import { cardPrompt, editPrompt, outlinePrompt, type ComponentHint, type WriterContext } from './prompts';
+import { plannerDigest } from './chunking';
+import type { SourceChunk, SourceFigure } from './source';
 import { newId, sanitizeBlocks } from './blocks';
 import { splitByBreaks } from './settings';
 import type { AccentPosition, Block, Card, EditScope, GenerationSettings, OutlineCard } from './types';
@@ -10,14 +12,19 @@ import type { AccentPosition, Block, Card, EditScope, GenerationSettings, Outlin
  * fallback when no provider is configured (the deck then carries a
  * `demo_model` warning so the UI can say so).
  */
-export interface PlannedOutline { title: string; cards: { title: string; points: string[] }[] }
+export interface PlannedCard { title: string; points: string[]; sources?: string[]; figures?: string[] }
+export interface PlannedOutline { title: string; cards: PlannedCard[] }
+/** A chunked source handed to the planner (see chunking.ts). */
+export interface OutlineSource { chunks: SourceChunk[]; figures: SourceFigure[] }
 export interface WrittenCard { blocks: Block[]; accent: AccentPosition; imagePrompt: string }
 export interface EditedCards { cards: { id: string; blocks: Block[]; accent?: AccentPosition }[]; summary: string }
 
 export interface DeckModel {
   kind: 'provider' | 'mock';
-  planOutline(s: GenerationSettings, inputText: string, opts?: { instruction?: string; previous?: OutlineCard[] }): Promise<PlannedOutline>;
-  writeCard(s: GenerationSettings, card: OutlineCard, index: number, total: number, deckTitle: string): Promise<WrittenCard>;
+  planOutline(s: GenerationSettings, inputText: string, opts?: { instruction?: string; previous?: OutlineCard[]; source?: OutlineSource; components?: ComponentHint[] }): Promise<PlannedOutline>;
+  writeCard(s: GenerationSettings, card: OutlineCard, index: number, total: number, deckTitle: string, ctx?: WriterContext): Promise<WrittenCard>;
+  /** Which provider/model wrote the deck, for diagnostics ("provider:qwen-3.8-max"). */
+  label?: string;
   editCards(s: GenerationSettings, scope: EditScope, instruction: string, cards: Card[]): Promise<EditedCards>;
   image(prompt: string, aspectRatio: string): Promise<{ data: Buffer; mime: string } | null>;
 }
@@ -42,11 +49,20 @@ export function parseJsonReply(reply: string): unknown {
   throw new Error('The model reply was cut off before the JSON ended.');
 }
 
-function normalizeOutline(raw: unknown): PlannedOutline {
+const ids = (v: unknown, pattern: RegExp, max: number) =>
+  Array.isArray(v) ? [...new Set(v.map(x => String(x).trim().replace(/^\[|\]$/g, '')).filter(x => pattern.test(x)))].slice(0, max) : [];
+
+export function normalizeOutline(raw: unknown): PlannedOutline {
   const o = (raw || {}) as Record<string, unknown>;
   const cards = Array.isArray(o.cards) ? o.cards.map(c => {
     const x = (c || {}) as Record<string, unknown>;
-    return { title: String(x.title || '').slice(0, 200), points: Array.isArray(x.points) ? x.points.map(p => String(p).slice(0, 800)).filter(Boolean).slice(0, 12) : [] };
+    const sources = ids(x.sources, /^C\d{1,4}$/, 4);
+    const figures = ids(x.figures, /^F\d{1,4}$/, 3);
+    return {
+      title: String(x.title || '').slice(0, 200),
+      points: Array.isArray(x.points) ? x.points.map(p => String(p).slice(0, 800)).filter(Boolean).slice(0, 12) : [],
+      ...(sources.length ? { sources } : {}), ...(figures.length ? { figures } : {}),
+    };
   }).filter(c => c.title) : [];
   if (!cards.length) throw new Error('The model returned an empty outline.');
   return { title: String(o.title || cards[0].title).slice(0, 200), cards: cards.slice(0, 60) };
@@ -54,23 +70,27 @@ function normalizeOutline(raw: unknown): PlannedOutline {
 
 // ── Provider model ────────────────────────────────────────────────────────
 
-export async function createProviderModel(): Promise<DeckModel | null> {
+export async function createProviderModel(ref?: GenerationSettings['model']): Promise<DeckModel | null> {
   const { resolveProvider } = await import('../provider-resolver');
-  const resolved = resolveProvider({});
+  const resolved = ref?.providerId ? resolveProvider({ providerId: ref.providerId, model: ref.model }) : resolveProvider({});
   if (!resolved.hasCredentials) return null;
   const { generateTextFromProvider } = await import('../text-generator');
+  const model = ref?.model || resolved.upstreamModel || resolved.model || '';
+  const providerId = resolved.provider?.id || ref?.providerId || '';
   const ask = async (system: string, prompt: string, maxTokens: number) => parseJsonReply(await generateTextFromProvider({
-    providerId: resolved.provider?.id || '', model: resolved.upstreamModel || resolved.model || '', system, prompt, maxTokens,
-    abortSignal: AbortSignal.timeout(180_000),
+    providerId, model, system, prompt, maxTokens,
+    abortSignal: AbortSignal.timeout(240_000),
   }));
   return {
     kind: 'provider',
+    label: `${resolved.provider?.name || 'provider'} · ${model}`,
     async planOutline(s, inputText, opts) {
-      const { system, prompt } = outlinePrompt(s, inputText, opts);
-      return normalizeOutline(await ask(system, prompt, 8192));
+      const source = opts?.source ? { digest: plannerDigest(opts.source.chunks, opts.source.figures), chunkIds: opts.source.chunks.map(c => c.id), figureIds: opts.source.figures.map(f => f.id) } : undefined;
+      const { system, prompt } = outlinePrompt(s, inputText, { instruction: opts?.instruction, previous: opts?.previous, source, components: opts?.components });
+      return normalizeOutline(await ask(system, prompt, 12000));
     },
-    async writeCard(s, card, index, total, deckTitle) {
-      const { system, prompt } = cardPrompt(s, card, index, total, deckTitle);
+    async writeCard(s, card, index, total, deckTitle, ctx) {
+      const { system, prompt } = cardPrompt(s, card, index, total, deckTitle, ctx);
       const raw = (await ask(system, prompt, 4096)) as Record<string, unknown>;
       const blocks = sanitizeBlocks(raw.blocks);
       if (!blocks.length) throw new Error('The model returned an empty card.');
@@ -190,10 +210,44 @@ function mockCardBlocks(card: OutlineCard, index: number): WrittenCard {
   return { blocks, accent, imagePrompt: card.title };
 }
 
+/** Deterministic outline from chunks: budgeted cards per chunk, the chunk's figures spread over its cards. */
+function mockSourcedOutline(s: GenerationSettings, source: OutlineSource, title: string, components: ComponentHint[] = []): PlannedOutline {
+  const per = s.amount === 'brief' ? 2 : s.amount === 'medium' ? 3 : 5;
+  const used = new Set<string>();
+  const cards: PlannedCard[] = [];
+  const front = source.chunks.find(c => c.kind === 'front');
+  cards.push({ title, points: [sentenceSplit(front?.text || title)[0]?.slice(0, 200) || title] });
+  // An overview card from the top-level sections, grouped to an item count a template component holds.
+  const tops = [...new Set(source.chunks.filter(c => c.kind === 'body' && c.path[0]).map(c => c.path[0]))].map(t => t.replace(/^(?:\d+|[A-Z])(?:\.\d+)*\.?\s+/, ''));
+  const fit = components.map(c => c.units).filter(u => u >= 2 && u <= tops.length).sort((a, b) => b - a)[0];
+  if (fit && tops.length >= 2) {
+    const groups = Array.from({ length: fit }, (_, g) => tops.slice(Math.floor((g * tops.length) / fit), Math.floor(((g + 1) * tops.length) / fit)));
+    cards.push({ title: isZh(title) ? '内容概览' : 'Overview', points: groups.map(g => (g.length > 1 ? `${g[0]}: ${g.slice(1).join(', ')}` : g[0]).slice(0, 120)) });
+  }
+  for (const chunk of source.chunks) {
+    if (chunk.cardBudget < 1) continue;
+    const sentences = sentenceSplit(chunk.text).filter(x => x.length > 30 && !x.startsWith('|'));
+    const tableRows = chunk.text.split('\n').filter(x => x.startsWith('|')).slice(0, 8);
+    const figs = chunk.figureIds.filter(id => !used.has(id));
+    for (let k = 0; k < chunk.cardBudget; k++) {
+      const slice = sentences.slice(Math.floor((k * sentences.length) / chunk.cardBudget), Math.floor(((k + 1) * sentences.length) / chunk.cardBudget));
+      const points = slice.slice(0, per).map(x => x.slice(0, 220));
+      if (k === 0 && tableRows.length) points.push(...tableRows.slice(1, 4).map(r => r.replace(/^\|\s*|\s*\|$/g, '').replace(/\s*\|\s*/g, ': ')));
+      const figure = figs[k];
+      if (figure) used.add(figure);
+      const label = chunk.path.at(-1) || chunk.title;
+      cards.push({ title: `${label.replace(/^(?:\d+|[A-Z])(?:\.\d+)*\.?\s+/, '')}${chunk.cardBudget > 1 ? ` (${k + 1})` : ''}`.slice(0, 120), points: points.length ? points : [chunk.title], sources: [chunk.id], ...(figure ? { figures: [figure] } : {}) });
+    }
+  }
+  return { title, cards };
+}
+
 export function createMockModel(): DeckModel {
   return {
     kind: 'mock',
+    label: 'demo model (offline)',
     async planOutline(s, inputText, opts) {
+      if (opts?.source) return mockSourcedOutline(s, opts.source, topicOf(inputText), opts.components);
       let body = mockSections(s, inputText);
       if (s.textMode === 'condense') body = body.map(c => ({ ...c, points: c.points.slice(0, s.amount === 'brief' ? 2 : s.amount === 'medium' ? 3 : 5) }));
       if (opts?.instruction && /short|fewer|精简|少/i.test(opts.instruction)) body = body.slice(0, Math.max(2, Math.ceil(body.length / 2)));
@@ -233,8 +287,8 @@ let override: DeckModel | null = null;
 /** Tests inject a model; production resolves provider → mock. */
 export function setDeckModelForTests(model: DeckModel | null) { override = model; }
 
-export async function resolveDeckModel(): Promise<DeckModel> {
+export async function resolveDeckModel(ref?: GenerationSettings['model']): Promise<DeckModel> {
   if (override) return override;
   if (process.env.DECKS_MODEL === 'mock') return createMockModel();
-  try { return (await createProviderModel()) || createMockModel(); } catch { return createMockModel(); }
+  try { return (await createProviderModel(ref)) || createMockModel(); } catch { return createMockModel(); }
 }

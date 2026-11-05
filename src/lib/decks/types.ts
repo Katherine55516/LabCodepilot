@@ -1,3 +1,6 @@
+import type { DeckSourceDoc } from './source';
+export type { DeckSourceDoc, SourceChunk, SourceFigure } from './source';
+
 /**
  * Decks: card-based AI presentations, modelled on the Gamma reverse-engineering
  * reports (docs/research/gamma-reverse/). This file is the shared contract for
@@ -65,6 +68,8 @@ export interface GenerationSettings {
   dimensions: CardDimensions;
   /** Gamma 5 offers Plan (review the outline first) and Express (build straight away) (report 02 §3). */
   mode?: 'plan' | 'express';
+  /** Pin a configured provider and model for this deck (the lab's model picker); default: the account's default. */
+  model?: { providerId: string; model: string };
 }
 
 export const NUM_CARDS_RANGE = { min: 1, max: 60 } as const;
@@ -79,7 +84,7 @@ export type Block =
   | { id: string; type: 'paragraph'; text: InlineText }
   | { id: string; type: 'bullets'; items: InlineText[] }
   | { id: string; type: 'numbered'; items: InlineText[] }
-  | { id: string; type: 'image'; mediaId?: string; alt: string; caption?: string; fit: 'cover' | 'contain'; placeholder?: boolean }
+  | { id: string; type: 'image'; mediaId?: string; alt: string; caption?: string; fit: 'cover' | 'contain'; placeholder?: boolean; /** Max height on the logical canvas (galleries); default 420. */ height?: number }
   | { id: string; type: 'table'; header: string[]; rows: string[][] }
   | { id: string; type: 'chart'; chartType: 'bar' | 'line' | 'pie'; labels: string[]; series: { name: string; values: number[] }[]; unit?: string }
   | { id: string; type: 'callout'; tone: 'info' | 'warning' | 'success' | 'note'; title?: string; text: InlineText }
@@ -91,6 +96,8 @@ export type Block =
   | { id: string; type: 'metrics'; items: { value: string; label: string; detail?: string }[] }
   | { id: string; type: 'grid'; items: { title: string; text?: InlineText; icon?: string }[] }
   | { id: string; type: 'columns'; columns: Block[][] }
+  /** An item list drawn with one of the template's own diagram components (template-components.ts). */
+  | { id: string; type: 'templateDiagram'; componentId: string; items: { title: string; text?: InlineText; /** a source figure shown in the item's image slot */ mediaId?: string }[] }
   | { id: string; type: 'divider' };
 
 export type BlockType = Block['type'];
@@ -106,6 +113,28 @@ export interface CardLayout {
   /** Seed for the generated theme art when there is no media (defaults to the card id); "new image" changes it. */
   accentSeed?: string;
   align: 'left' | 'center';
+  /** Share of the card the accent slot takes (width for left/right, height for top), 0.25–0.6; default 0.4 (top 0.38). */
+  accentSize?: number;
+  /** cover crops to fill (decorative art); contain shows the whole image (figures, charts). Default cover. */
+  accentFit?: 'cover' | 'contain';
+  /** Caption under a contained accent image (e.g. "Figure 4. …"). */
+  accentCaption?: string;
+  /**
+   * A thin strip of template artwork across the top or bottom (height share 0.12–0.24),
+   * so a card whose accent slot holds a content figure keeps the template's look.
+   */
+  band?: { mediaId: string; position: 'top' | 'bottom'; size: number };
+}
+
+/** Why a card's media looks the way it does (media planner output; shown in the lab, not in the deck). */
+export interface CardMediaNote {
+  /** Body text load relative to the card's capacity without an image (1 = full). */
+  fill: number;
+  figuresCited: string[];
+  figuresPlaced: string[];
+  /** Cited figures left off this card because the text needed the room. */
+  figuresDeferred: string[];
+  rule: string;
 }
 
 export interface Card {
@@ -117,6 +146,9 @@ export interface Card {
   stage: CardStage;
   /** Findings from the checking pass that polishing could not resolve. */
   issues?: CardIssue[];
+  /** Source chunks this card was written from (structured sources). */
+  sourceIds?: string[];
+  media?: CardMediaNote;
 }
 
 export interface CardIssue { code: 'overflow' | 'empty' | 'duplicate_image' | 'missing_image' | 'model_fallback'; message: string }
@@ -128,6 +160,9 @@ export interface OutlineCard {
   points: string[];
   /** Per-card instruction from the review step (Gamma: "Instruction" per card). */
   instruction?: string;
+  /** Structured sources: the chunks (C…) this card draws from and the figures (F…) that illustrate it. */
+  sourceIds?: string[];
+  figureIds?: string[];
 }
 
 export type DeckStatus = 'outlining' | 'outline_ready' | 'generating' | 'ready' | 'failed';
@@ -156,14 +191,35 @@ export interface Deck {
   inputMediaIds?: string[];
   /** Which model wrote the deck: 'provider' or the offline 'mock' demo model. */
   model?: 'provider' | 'mock';
+  /** Provider and model name that wrote the deck (diagnostics). */
+  modelLabel?: string;
   /** Where the content came from (report 06 §4 import intents). */
   source?: DeckSource;
+  /** A long source (PDF, long Markdown) split into chunks and figures (src/lib/decks/chunking.ts). */
+  sourceDoc?: DeckSourceDoc;
+  /** A theme and artwork read from an uploaded .pptx/.potx (src/lib/decks/template-pptx.ts). */
+  template?: DeckTemplate;
   error?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DeckWarning { code: string; message: string }
+
+export interface DeckTemplate {
+  fileName: string;
+  theme: DeckTheme;
+  /** Decorative images from the template, hosted as deck media, used as accent art. */
+  accentMediaIds: string[];
+  /** Their shapes, roles and source slides, so each slot gets artwork of a matching shape (and the cover gets the template's cover art). */
+  accentMeta?: { id: string; width?: number; height?: number; role?: string; slide?: number }[];
+  /** The template's brand logo (placed in the header/footer). */
+  logoMediaId?: string;
+  /** Accent positions the template uses, in slide order (the layout rhythm to follow). */
+  accentRhythm: AccentPosition[];
+  /** What was read and what was left out (e.g. a vendor badge). */
+  notes: string[];
+}
 
 export interface DeckSource { kind: 'prompt' | 'paste' | 'import' | 'api'; fileName?: string; intent?: ImportIntent }
 /** What to do with an imported deck (report 06 §4): keep it as-is, restyle it, or condense it into a new deck. */
@@ -227,7 +283,7 @@ export interface DeckVersion { version: number; reason: string; createdAt: strin
 
 // ── Media (report 04 §3) ──────────────────────────────────────────────────
 
-export type MediaOrigin = 'upload' | 'url' | 'ai' | 'accent';
+export type MediaOrigin = 'upload' | 'url' | 'ai' | 'accent' | 'source' | 'template';
 export interface MediaItem {
   id: string;
   deckId: string;
@@ -254,6 +310,47 @@ export interface DeckTheme {
   radius: number;
   /** Original SVG accent artwork style (src/lib/decks/accent-art.ts). */
   accentStyle: 'aurora' | 'grid' | 'waves' | 'orbs' | 'stripes' | 'paper';
+  /** Diagram components read from an imported template (template themes only). */
+  components?: TemplateComponent[];
+}
+
+/** A shape, line or picture inside a template component; geometry is relative to the component box (0–1). */
+export type TemplateComponentLayer =
+  /** `slot`: the item's picture (a photo tile in the template) — content figures replace it. */
+  | { type: 'image'; mediaId?: string; x: number; y: number; w: number; h: number; unit?: number; slot?: boolean; /** visible part of the picture (fractions of its box), for motif extensions */ clip?: { x0: number; x1: number; y0: number; y1: number }; /** mirrored along the motif axis (a clean far end for a strip) */ flip?: 'x' | 'y' }
+  | { type: 'shape'; geom: 'rect' | 'roundRect' | 'ellipse'; x: number; y: number; w: number; h: number; fill?: string; fillAlpha?: number; stroke?: string; strokeWidth?: number; unit?: number }
+  | { type: 'line'; x: number; y: number; w: number; h: number; stroke: string; strokeWidth: number; unit?: number };
+/** Where one item's title, body or number goes, with the template's text style (size in pt on the template slide). */
+export interface TemplateComponentSlot {
+  role: 'title' | 'body' | 'number'; unit: number; x: number; y: number; w: number; h: number;
+  size: number; color: string; face?: string; bold: boolean; align: 'l' | 'ctr' | 'r'; anchor: 't' | 'ctr' | 'b'; sample: string;
+}
+export interface TemplateComponent {
+  id: string;
+  slide: number;
+  kind: 'radial' | 'row' | 'column' | 'grid';
+  /** Number of items it holds. Radial components need exactly this many; rows/columns/grids can repeat or drop units. */
+  units: number;
+  numbered: boolean;
+  hasBody: boolean;
+  /** Box on the template slide (shares of width/height) and its width ÷ height in slide units. */
+  box: { x: number; y: number; w: number; h: number };
+  aspect: number;
+  slideWidthPt: number;
+  layers: TemplateComponentLayer[];
+  slots: TemplateComponentSlot[];
+  /** Each unit's box (relative); rows, columns and grids repeat or drop units along these (component-layout.ts). */
+  unitBoxes: { x: number; y: number; w: number; h: number }[];
+  /** Units that carry a picture slot (content figures can go there). */
+  imageSlots: number;
+  /** Irregular composition (units overlap or differ in size): usable only at its own count. */
+  fixed?: boolean;
+  /**
+   * A picture whose pattern repeats along the items (a chain, an arrow strip): layer index, axis, the
+   * pattern period (share of the component box along the axis, measured from the pixels) and how many
+   * items one period carries. The component grows by repeating the pattern (component-layout.ts).
+   */
+  motif?: { layer: number; axis: 'x' | 'y'; period: number; perPeriod: number; /** visible content of the picture along the axis (fractions of its box) */ start: number; end: number };
 }
 
 // ── API shapes (src/app/api/decks/**) ─────────────────────────────────────
@@ -265,6 +362,8 @@ export interface CreateDeckRequest {
   /** A prepared outline (imports, API inputTextBreaks): skips the planner; each card keeps its points as written. */
   outline?: { title: string; points: string[] }[];
   source?: DeckSource;
+  /** A structured source prepared server-side (PDF import, lab); figures are attached by the caller. */
+  sourceDoc?: DeckSourceDoc;
 }
 /** GET /api/decks → { decks: DeckSummary[] } ; GET /api/decks/:id → { deck, job?, proposals } */
 export interface DeckResponse { deck: Deck; job?: DeckJob; proposals: EditProposal[]; media: MediaItem[] }

@@ -3,6 +3,7 @@ import { respond } from '@/lib/decks/http';
 import { IMPORT_INTENTS, ImportError, MAX_IMPORT_BYTES, importRequest, parsePresentation } from '@/lib/decks/import';
 import { updateDeck } from '@/lib/decks/store';
 import type { ImportIntent } from '@/lib/decks/types';
+import { parseSourceFile, SourceImportError, sourceDeckRequest } from '@/lib/decks/source-import';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ async function readBody(request: Request): Promise<Buffer> {
 
 /**
  * POST /api/decks/import?fileName=…&intent=asIs|restyle|condense&themeId=…&mode=plan|express
- * Body: the raw file bytes (.pptx, .potx, .md, .txt; ≤ 50 MB) → 201 { deck, job }.
+ * Body: the raw file bytes (.pptx, .potx, .md, .txt, .pdf; ≤ 50 MB) → 201 { deck, job }. A PDF is read as a long source (chunked, figures kept).
  */
 export async function POST(request: Request) {
   return respond(async () => {
@@ -46,6 +47,16 @@ export async function POST(request: Request) {
     const themeId = params.get('themeId') || undefined;
 
     const bytes = await readBody(request);
+    // Long sources (PDF, report 06 §5): chunked, grounded, figures placed by the media planner.
+    if (/\.pdf$/i.test(fileName)) {
+      let source;
+      try { source = await parseSourceFile(bytes, fileName); } catch (error) {
+        if (error instanceof SourceImportError) throw new EngineError(error.status, error.message, error.code);
+        throw error;
+      }
+      const { request: create, figures } = sourceDeckRequest(source, { settings: { mode, ...(themeId ? { themeId } : {}) } });
+      return createDeck(create, { attachments: { figures } });
+    }
     let parsed;
     try { parsed = await parsePresentation(bytes, fileName); } catch (error) {
       if (error instanceof ImportError) throw new EngineError(error.status, error.message, error.code);

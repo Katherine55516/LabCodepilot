@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Sparkle } from '@phosphor-icons/react';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { decksApi } from '@/lib/decks/client';
-import { getTheme } from '@/lib/decks/themes';
+import { themeFor } from '@/lib/decks/themes';
 import type { DeckResponse, MediaItem } from '@/lib/decks/types';
 import { useDecksT } from '../i18n';
 import { AiPanel } from './AiPanel';
@@ -45,7 +45,7 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
   const [actionError, setActionError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'hf' | 'history' | null>(null);
 
-  const theme = getTheme(draft.themeId);
+  const theme = themeFor(draft.themeId, deck.template);
   const dimensions = deck.settings.dimensions;
   const visible = cards.filter(c => !c.hidden);
   const job = data.job;
@@ -154,7 +154,7 @@ export function DeckEditor({ deckId, data, refresh, setData }: DeckEditorProps) 
         title={draft.title} onTitle={s.setTitle}
         status={saver.status} saveError={saver.error}
         onReload={() => { s.discardLocal(); refresh(); }} onRetry={() => { void saver.flush(); }}
-        themeId={draft.themeId} onTheme={s.setTheme}
+        themeId={draft.themeId} onTheme={s.setTheme} extraThemes={deck.template ? [deck.template.theme] : []}
         onOpenHeaderFooter={() => setDialog('hf')} onOpenHistory={() => setDialog('history')}
         onPresent={() => { void present(); }}
         exportMenu={<ExportMenu deck={exportDeck} theme={theme} flush={saver.flush} onError={setActionError} />}

@@ -21,6 +21,7 @@ export function defaultBlock(type: BlockType, t: T): Block {
     case 'bullets': return { id, type, items: [item(1), item(2), item(3)] };
     case 'numbered': return { id, type, items: [item(1), item(2), item(3)] };
     case 'image': return { id, type, alt: t('decks.editor.default.image'), fit: 'cover', placeholder: true };
+    case 'templateDiagram': return { id, type, componentId: 'K1', items: [{ title: item(1) }, { title: item(2) }, { title: item(3) }, { title: item(4) }] };
     case 'table': return {
       id, type,
       header: [1, 2, 3].map(n => t('decks.editor.default.column', { n })),

@@ -28,8 +28,9 @@ import { deflateSync } from 'node:zlib';
 import type { Block, Card, CardDimensions, Deck, DeckTheme, HeaderFooter, HeaderFooterSlot } from './types';
 import { DIMENSION_RATIO } from './types';
 import { parseInline, plainText, visualLength } from './blocks';
-import { getTheme } from './themes';
+import { deckTheme } from './themes';
 import { accentSvg } from './accent-art';
+import { arrangeComponent, canArrange } from './component-layout';
 
 export interface PptxMedia { data: Buffer; mime: string }
 export interface BuildDeckPptxOptions { readMedia?: (mediaId: string) => PptxMedia | null }
@@ -333,6 +334,7 @@ function planBlock(c: Ctx, block: Block, w: number): Plan {
       };
     }
     case 'image': return planImage(c, block, w);
+    case 'templateDiagram': return planTemplateDiagram(c, block, w);
     case 'divider': {
       const h = v(c, 10);
       return { h, draw: (slide, x, y) => addHLine(slide, c, x, y + h / 2, w, colors.border, 2) };
@@ -539,6 +541,73 @@ function planGrid(c: Ctx, block: Extract<Block, { type: 'grid' }>, w: number): P
   });
 }
 
+/**
+ * A template diagram component (template-components.ts) as native objects:
+ * its pictures and shapes at their relative positions, item texts in the
+ * template's slots (editable text boxes), scaled to the column width and at
+ * most 400 px tall — the same box CardView draws.
+ */
+function planTemplateDiagram(c: Ctx, block: Extract<Block, { type: 'templateDiagram' }>, w: number): Plan {
+  const found = c.theme.components?.find(k => k.id === block.componentId);
+  const comp = found && canArrange(found, block.items.length) ? found : undefined;
+  if (!comp) return planBlock(c, { id: block.id, type: 'grid', items: block.items.map(i => ({ title: i.title, ...(i.text ? { text: i.text } : {}) })) }, w);
+  const arranged = arrangeComponent(comp, block.items.length, block.items);
+  const maxH = (comp.kind === 'column' || arranged.aspect < comp.aspect * 0.9 ? 520 : 400) * c.s;
+  const boxW = Math.min(w, maxH * arranged.aspect), boxH = boxW / arranged.aspect;
+  const ptToPx = boxW / (comp.slideWidthPt * comp.box.w) / arranged.widthScale; // template pt → canvas px at this size
+  return {
+    h: boxH, draw: (slide, x0, y0) => {
+      const x = x0 + (w - boxW) / 2;
+      const at = (r: { x: number; y: number; w: number; h: number }) => ({ x: x + r.x * boxW, y: y0 + r.y * boxH, w: r.w * boxW, h: r.h * boxH });
+      for (const layer of arranged.layers) {
+        const b = at(layer);
+        if (layer.type === 'image') {
+          const figureId = layer.slot && layer.unit !== undefined ? block.items[layer.unit]?.mediaId : undefined;
+          const media = c.media(figureId || layer.mediaId);
+          if (media && figureId && media.w && media.h) {
+            // A figure in a picture slot: shown whole, centred in the slot.
+            const r = media.h / media.w, dw = Math.min(b.w, b.h / r), dh = dw * r;
+            slide.addImage({ data: media.data, x: inch(c, b.x + (b.w - dw) / 2), y: inch(c, b.y + (b.h - dh) / 2), w: inch(c, dw), h: inch(c, dh), altText: block.items[layer.unit!]?.title || '' });
+          } else if (media && layer.clip) {
+            // Motif continuation: the picture at full size, cropped to its visible part (srcRect).
+            const cl = layer.clip;
+            // srcRect crops the source picture before the shape is flipped: mirror the crop for a flipped segment.
+            const sx0 = layer.flip === 'x' ? 1 - cl.x1 : cl.x0, sy0 = layer.flip === 'y' ? 1 - cl.y1 : cl.y0;
+            slide.addImage({ data: media.data, x: inch(c, b.x + b.w * cl.x0), y: inch(c, b.y + b.h * cl.y0), w: inch(c, b.w), h: inch(c, b.h), altText: '',
+              ...(layer.flip === 'x' ? { flipH: true } : layer.flip === 'y' ? { flipV: true } : {}),
+              sizing: { type: 'crop', x: inch(c, b.w * sx0), y: inch(c, b.h * sy0), w: inch(c, b.w * (cl.x1 - cl.x0)), h: inch(c, b.h * (cl.y1 - cl.y0)) } });
+          } else if (media) slide.addImage({ data: media.data, x: inch(c, b.x), y: inch(c, b.y), w: inch(c, b.w), h: inch(c, b.h), altText: '' });
+        } else if (layer.type === 'line') {
+          if (b.w >= b.h) addHLine(slide, c, b.x, b.y + b.h / 2, b.w, layer.stroke, layer.strokeWidth * ptToPx);
+          else addBox(slide, c, 'rect', b.x + b.w / 2 - 1, b.y, Math.max(1, layer.strokeWidth * ptToPx), b.h, { fill: layer.stroke });
+        } else {
+          addBox(slide, c, layer.geom, b.x, b.y, b.w, b.h, {
+            ...(layer.fill ? { fill: layer.fill, ...(layer.fillAlpha !== undefined && layer.fillAlpha < 1 ? { transparency: Math.round((1 - layer.fillAlpha) * 100) } : {}) } : {}),
+            ...(layer.stroke ? { line: layer.stroke, lineWidthPx: (layer.strokeWidth || 1) * ptToPx } : {}),
+            radiusPx: layer.geom === 'roundRect' ? Math.min(b.w, b.h) * 0.2 : 0,
+          });
+        }
+      }
+      for (const slot of arranged.slots) {
+        const item = block.items[slot.unit];
+        const value = slot.role === 'number' ? numberLike(slot.sample, slot.unit) : slot.role === 'title' ? item?.title : item?.text;
+        if (!value) continue;
+        const b = at(slot);
+        const px = Math.max(8, slot.size * ptToPx);
+        const face = slot.role === 'body' ? c.fonts.body : c.fonts.heading;
+        addTextBox(slide, c, runsOf({ ...c, s: 1 }, value, { px, color: slot.color || c.theme.colors.text, face, bold: slot.bold }, slot.role !== 'number'), b.x, b.y, Math.max(b.w, px * 2), Math.max(b.h, px * 1.3),
+          { align: slot.align === 'ctr' ? 'center' : slot.align === 'r' ? 'right' : 'left', valign: slot.anchor === 'ctr' ? 'middle' : 'top', lineHeight: 1.15 });
+      }
+    },
+  };
+}
+
+/** "1" → "3", "01" → "03": numbers in the template's own format. */
+export function numberLike(sample: string, unit: number): string {
+  const n = String(unit + 1);
+  return /^\s*0\d/.test(sample) ? n.padStart(2, '0') : n;
+}
+
 function planImage(c: Ctx, block: Extract<Block, { type: 'image' }>, w: number): Plan {
   const { colors, radius } = c.theme;
   const media = c.media(block.mediaId);
@@ -558,9 +627,9 @@ function planImage(c: Ctx, block: Extract<Block, { type: 'image' }>, w: number):
       },
     };
   }
-  // CardView: width 100%, max-height 420, object-fit cover|contain.
+  // CardView: width 100%, max-height (block.height ?? 420), object-fit cover|contain.
   const ratio = media.w && media.h ? media.h / media.w : 9 / 16;
-  const boxH = Math.min(420, w * ratio) * c.s;
+  const boxH = (block.height && block.fit === 'contain' ? block.height : Math.min(block.height ?? 420, w * ratio)) * c.s;
   return {
     h: boxH + capGap + capH, draw: (slide, x, y) => {
       if (block.fit === 'contain' || !media.w || !media.h) {
@@ -653,6 +722,20 @@ export function accentArtForSlot(theme: DeckTheme, seed: string, slotW: number, 
 function addAccent(slide: Slide, c: Ctx, card: Card, slot: { x: number; y: number; w: number; h: number }) {
   const media = card.layout.accentMediaId ? c.media(card.layout.accentMediaId) : null;
   const pos = { x: inch(c, slot.x), y: inch(c, slot.y), w: inch(c, slot.w), h: inch(c, slot.h) };
+  if (media && card.layout.accentFit === 'contain') {
+    // A figure: the whole image on the surface colour, caption underneath (CardView's contained accent).
+    addBox(slide, c, 'rect', slot.x, slot.y, slot.w, slot.h, { fill: c.theme.colors.surface });
+    const padX = card.layout.accent === 'top' ? 80 : 28, padY = card.layout.accent === 'top' ? 20 : 40;
+    const caption = card.layout.accentCaption || '';
+    const capF = 15, capW = slot.w - padX * 2;
+    const capH = caption ? textHeight(caption, capF, 1.35, capW, c.fonts.bodyKind) : 0;
+    const boxW = capW, boxH = slot.h - padY * 2 - (caption ? capH + 10 : 0);
+    const ratio = media.w && media.h ? media.h / media.w : 0.75;
+    const dw = Math.min(boxW, boxH / ratio), dh = dw * ratio;
+    slide.addImage({ data: media.data, x: inch(c, slot.x + padX + (boxW - dw) / 2), y: inch(c, slot.y + padY + (boxH - dh) / 2), w: inch(c, dw), h: inch(c, dh), altText: caption });
+    if (caption) addTextBox(slide, { ...c, s: 1 }, runsOf({ ...c, s: 1 }, caption, { px: capF, color: c.theme.colors.muted, face: c.fonts.body }, false), slot.x + padX, slot.y + slot.h - padY - capH, capW, capH, { lineHeight: 1.35 });
+    return;
+  }
   if (media) {
     if (media.w && media.h) slide.addImage({ data: media.data, x: pos.x, y: pos.y, w: pos.w, h: round(pos.w * (media.h / media.w), 4), sizing: { type: 'cover', w: pos.w, h: pos.h }, altText: '' });
     else slide.addImage({ data: media.data, ...pos, altText: '' });
@@ -713,15 +796,28 @@ function addCardSlide(pptx: PptxGenJS, deck: Deck, card: Card, base: Ctx, canvas
   const slide = pptx.addSlide();
   slide.background = { color: hex(theme.colors.background) };
   const accent = card.layout.accent;
-  let region: Region = { x: 0, y: 0, w: CANVAS, h: canvasH };
+  const share = card.layout.accentSize ?? (accent === 'top' ? 0.38 : 0.4);
+  // A template-art band takes a strip at the top or bottom; the card body lays out in the rest (CardView does the same).
+  const band = card.layout.band;
+  const bandMedia = band ? base.media(band.mediaId) : null;
+  const bandH = band && bandMedia ? canvasH * band.size : 0;
+  const top0 = band?.position === 'top' ? bandH : 0;
+  const bodyH = canvasH - bandH;
+  if (band && bandMedia) {
+    const by = band.position === 'top' ? 0 : canvasH - bandH;
+    const pos = { x: inch(base, 0), y: inch(base, by), w: inch(base, CANVAS), h: inch(base, bandH) };
+    if (bandMedia.w && bandMedia.h) slide.addImage({ data: bandMedia.data, x: pos.x, y: pos.y, w: pos.w, h: round(pos.w * (bandMedia.h / bandMedia.w), 4), sizing: { type: 'cover', w: pos.w, h: pos.h }, altText: '', objectName: 'Template band' });
+    else slide.addImage({ data: bandMedia.data, ...pos, altText: '', objectName: 'Template band' });
+  }
+  let region: Region = { x: 0, y: top0, w: CANVAS, h: bodyH };
   let slot: Region | null = null;
-  if (accent === 'left') { slot = { x: 0, y: 0, w: CANVAS * 0.4, h: canvasH }; region = { x: CANVAS * 0.4, y: 0, w: CANVAS * 0.6, h: canvasH }; }
-  else if (accent === 'right') { slot = { x: CANVAS * 0.6, y: 0, w: CANVAS * 0.4, h: canvasH }; region = { x: 0, y: 0, w: CANVAS * 0.6, h: canvasH }; }
-  else if (accent === 'top') { slot = { x: 0, y: 0, w: CANVAS, h: canvasH * 0.38 }; region = { x: 0, y: canvasH * 0.38, w: CANVAS, h: canvasH * 0.62 }; }
-  else if (accent === 'background') slot = { x: 0, y: 0, w: CANVAS, h: canvasH };
+  if (accent === 'left') { slot = { x: 0, y: top0, w: CANVAS * share, h: bodyH }; region = { x: CANVAS * share, y: top0, w: CANVAS * (1 - share), h: bodyH }; }
+  else if (accent === 'right') { slot = { x: CANVAS * (1 - share), y: top0, w: CANVAS * share, h: bodyH }; region = { x: 0, y: top0, w: CANVAS * (1 - share), h: bodyH }; }
+  else if (accent === 'top') { slot = { x: 0, y: top0, w: CANVAS, h: bodyH * share }; region = { x: 0, y: top0 + bodyH * share, w: CANVAS, h: bodyH * (1 - share) }; }
+  else if (accent === 'background') slot = { x: 0, y: top0, w: CANVAS, h: bodyH };
 
   if (slot) addAccent(slide, base, card, slot);
-  if (accent === 'background') addBox(slide, base, 'rect', 0, 0, CANVAS, canvasH, theme.dark ? { fill: '#000000', transparency: 45 } : { fill: '#ffffff', transparency: 28 });
+  if (accent === 'background') addBox(slide, base, 'rect', 0, top0, CANVAS, bodyH, theme.dark ? { fill: '#000000', transparency: 45 } : { fill: '#ffffff', transparency: 28 });
 
   const pad = accent === 'background' ? { x: 96, y: 72 } : { x: 80, y: 64 };
   const contentW = region.w - pad.x * 2, availH = region.h - pad.y * 2;
@@ -826,7 +922,7 @@ async function finalise(buffer: Buffer): Promise<Buffer> {
 // ── Entry point ───────────────────────────────────────────────────────────
 
 export async function buildDeckPptx(deck: Deck, opts: BuildDeckPptxOptions = {}): Promise<Buffer> {
-  const theme = getTheme(deck.settings.themeId);
+  const theme = deckTheme(deck);
   const size = slideSize(deck.settings.dimensions, deck.settings.format);
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'DECK', width: size.width, height: size.height });

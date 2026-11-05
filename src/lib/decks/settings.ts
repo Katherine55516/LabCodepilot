@@ -50,7 +50,8 @@ export function normalizeSettings(input: Partial<GenerationSettings>, warnings: 
     ...(text(input.additionalInstructions, 5000) ? { additionalInstructions: text(input.additionalInstructions, 5000) } : {}),
     imageSource: oneOf<ImageSource>(input.imageSource, ['aiGenerated', 'themeAccent', 'placeholder', 'inputOnly', 'noImages'], 'themeAccent'),
     ...(text(input.imageStyle, 1000) ? { imageStyle: text(input.imageStyle, 1000) } : {}),
-    themeId: getTheme(input.themeId).id,
+    // Built-in theme ids, or an imported template's theme (`tpl_…`, resolved per deck by themeFor).
+    themeId: typeof input.themeId === 'string' && /^tpl_[\w-]{1,40}$/.test(input.themeId) ? input.themeId : getTheme(input.themeId).id,
     format,
     dimensions,
     mode: input.mode === 'express' ? 'express' : 'plan',

@@ -7,7 +7,7 @@ import { ArrowsIn, ArrowsOut, CaretLeft, CaretRight, Note, X } from '@phosphor-i
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { decksApi, mediaUrl } from '@/lib/decks/client';
-import { getTheme } from '@/lib/decks/themes';
+import { deckTheme } from '@/lib/decks/themes';
 import { DIMENSION_RATIO, type DeckResponse } from '@/lib/decks/types';
 import { CardView } from '../CardView';
 import { useDecksT } from '../i18n';
@@ -98,7 +98,7 @@ export function PresentView({ deckId }: { deckId: string }) {
         <div className={ratio ? 'flex min-h-0 flex-1 items-center justify-center overflow-hidden' : 'min-h-0 flex-1 overflow-y-auto'} onClick={() => go(1)}>
           <div className={ratio ? undefined : 'mx-auto'} style={{ width }}>
             <CardView
-              key={card.id} card={card} theme={getTheme(deck.settings.themeId)} dimensions={deck.settings.dimensions} mediaUrl={mediaUrl} width={width}
+              key={card.id} card={card} theme={deckTheme(deck)} dimensions={deck.settings.dimensions} mediaUrl={mediaUrl} width={width}
               cardNumber={current + 1} cardCount={cards.length} headerFooter={deck.headerFooter} deckTitle={deck.title}
             />
           </div>

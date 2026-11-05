@@ -49,3 +49,13 @@ export const DEFAULT_THEME_ID = 'slate';
 export function getTheme(id: string | undefined): DeckTheme {
   return DECK_THEMES.find(theme => theme.id === id) || DECK_THEMES.find(theme => theme.id === DEFAULT_THEME_ID)!;
 }
+
+/** A theme id, resolved against the deck's imported template theme first (ids `tpl_…`). */
+export function themeFor(themeId: string, template?: { theme: DeckTheme } | null): DeckTheme {
+  return template && template.theme.id === themeId ? template.theme : getTheme(themeId);
+}
+
+/** The theme a deck renders with. */
+export function deckTheme(deck: { settings: { themeId: string }; template?: { theme: DeckTheme } | null }): DeckTheme {
+  return themeFor(deck.settings.themeId, deck.template);
+}
