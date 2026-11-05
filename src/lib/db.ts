@@ -1172,6 +1172,63 @@ function migrateDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_ppt_gamma_jobs_project ON ppt_gamma_jobs(project_id);
   `);
 
+  // Decks（卡片演示，按 Gamma 逆向报告复刻的本机模块）：整份文档存 JSON（deck 即 Gamma 的 file），
+  // 每次保存递增 version 并写入 deck_versions 供恢复；任务、媒体、AI 编辑提案各一张表。
+  // 见 docs/handover/decks.md。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS decks (
+      id TEXT PRIMARY KEY,
+      uid TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      doc TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_decks_uid_updated ON decks(uid, updated_at);
+    CREATE TABLE IF NOT EXISTS deck_versions (
+      deck_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      doc TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (deck_id, version)
+    );
+    CREATE TABLE IF NOT EXISTS deck_jobs (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress TEXT NOT NULL DEFAULT '{}',
+      payload TEXT NOT NULL DEFAULT '{}',
+      queued TEXT NOT NULL DEFAULT '[]',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_jobs_deck ON deck_jobs(deck_id, created_at);
+    CREATE TABLE IF NOT EXISTS deck_media (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      path TEXT NOT NULL,
+      meta TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_media_deck ON deck_media(deck_id);
+    CREATE TABLE IF NOT EXISTS deck_proposals (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      doc TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_proposals_deck ON deck_proposals(deck_id, created_at);
+  `);
+
   // 凭证列加密迁移：把历史明文敏感列就地重封为密文。必须放在所有列迁移之后。
   reSealSensitiveColumns(db);
 }

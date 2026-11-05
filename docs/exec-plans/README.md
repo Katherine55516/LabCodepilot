@@ -2,7 +2,7 @@
 
 - [PPT自适应排版](completed/ppt-adaptive-layout-20261027.md)：原子媒体、图片/图注、规则卡片和C9空框；真实交互、同源24页原生回读与局部恢复验收完成。
 
-进行中：[上传模板媒体：槽位规则、图片读取与不重复](active/ppt-template-media-slots-20261102.md)（2026-11-02）。
+进行中：[Decks：按 Gamma 逆向复刻的卡片演示模块](active/decks-gamma-replica.md)（2026-11-05，Phase 0–4 完成，Phase 5 待做）；[上传模板媒体：槽位规则、图片读取与不重复](active/ppt-template-media-slots-20261102.md)（2026-11-02）。
 
 交接给 Codex：[Claude Agent SDK 轮次评审与待办](active/ppt-sdk-round-handoff-20261103.md)（2026-11-03）— 本轮已完成项、7 输入验收结果、按优先级排列的待改进点与复现方法。
 
