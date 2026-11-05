@@ -1,6 +1,7 @@
 # Gamma (gamma.app) reverse engineering: how it handles content, media, layout, templates, editing and export
 
 > Date: 2026-11-05 · Scope: Gamma 5 (launched 2026-10-06) and Gamma Classic.
+> **Detailed version:** this file is the overview. The full per-domain report set, verified claim by claim, is in [gamma-reverse/](gamma-reverse/README.md).
 > Technical implementation of the compatibility layer built from this review: [docs/handover/ppt-gamma-compat.md](../handover/ppt-gamma-compat.md) · product reasoning: [docs/insights/ppt-gamma-compat.md](../insights/ppt-gamma-compat.md)
 
 Confidence markers (borrowed from the [Reversa](https://github.com/sandeco/reversa) spec convention):
@@ -117,7 +118,11 @@ Workspace
 5. **Code is explained, not pasted**: a Python example became "raw = -ret5 / rank(20-day avg volume), then cross-sectional rank · example only".
 6. **Page count follows the content.** The user is not asked for a number up front.
 
+*Correction:* "table of contents dropped" (point 2) was true for that deck only; three other Gamma decks kept a contents or roadmap slide ([content report §3](gamma-reverse/03-content-handling.md)).
+
 ### 3.2 Measured density (Gamma 10 pages vs AIMate 22 pages, same input, 16:9) 🟢
+
+*Scope note added by the verification pass:* this is one dense deck. Density is strongly template-dependent; another Gamma template deck measured about 75 English words per page ([content report §4](gamma-reverse/03-content-handling.md)).
 
 | Metric | Gamma | AIMate |
 |---|---:|---:|
@@ -190,7 +195,7 @@ There are about 30 still-image models in four tiers. Credits per image:
 | Standard | 2–15 | Flux 1 Quick, Flux 2 Fast, GPT Image Mini Low, Ideogram 3 Turbo, Recraft V4, Leonardo Phoenix, … |
 | Advanced | 20–33 | Flux 2 Max, Ideogram 3, Nano Banana Flash, GPT Image 2, Dall-E 3, … |
 | Premium | 34–75 | Recraft vector (SVG) models, Ideogram 3 Quality, … |
-| Ultra | 30–125 | — |
+| Ultra | 30–125 per the pricing page (the model table's Ultra rows start at 115; Gamma's docs disagree, see [media report](gamma-reverse/04-media-handling.md)) | — |
 
 If `imageOptions.model` is omitted, Gamma picks one. Video model ids appear in the OpenAPI enum but **do not generate video** through this field.
 
@@ -204,7 +209,7 @@ If `imageOptions.model` is omitted, Gamma picks one. Video model ids appear in t
 
 ### 4.6 Media in the observed decks 🟢
 
-In same-input runs, Gamma kept **one picture per idea**. A figure sat on the card that explains it, and a dense figure was never shrunk next to text below legibility. Earlier hand-deck review rules in this repo (image and points on the same card, a chrome slot that is never empty, no repeated content images) were written to match this behaviour.
+In same-input runs, Gamma kept **one picture per idea**, with the figure on the card that explains it. ~~A dense figure was never shrunk next to text below legibility.~~ *Corrected 2026-11-05 by the verification pass:* figures were not content-fit-scaled, but they could still be small: the 18-page template-first deck's triple-barrier figure carried 8 / 9.5 pt labels ([media report §9](gamma-reverse/04-media-handling.md)). Earlier hand-deck review rules in this repo (image and points on the same card, a chrome slot that is never empty, no repeated content images) were written to match this behaviour.
 
 ---
 
