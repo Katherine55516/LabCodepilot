@@ -108,7 +108,8 @@ async function createGeneration(flavor: GammaFlavor, request: Request, deps: Gam
   const at = new Date(now).toISOString();
   deps.store.insert({ id, uid: deps.uid, projectId: data.project.id, flavor, settings: parsed.settings, warnings: parsed.warnings, phase: 'created', phaseError: '', createdAt: at, updatedAt: at });
   return flavor === 'agent'
-    ? json(200, { generationId: id, status: 'pending', warnings: parsed.warnings })
+    // Gamma: agent create answers 202 Accepted, Classic create answers 200.
+    ? json(202, { generationId: id, status: 'pending', warnings: parsed.warnings })
     : json(200, { generationId: id, ...(parsed.warnings.length ? { warnings: parsed.warnings.map(w => w.message).join(' ') } : {}) });
 }
 

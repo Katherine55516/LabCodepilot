@@ -147,7 +147,7 @@ const call = (h: ReturnType<typeof harness>, path: string, init?: RequestInit, k
 test('service: create, poll-driven plan and generate, signed export download', async () => {
   const h = harness();
   const created = await call(h, 'agent/generations', { method: 'POST', body: JSON.stringify({ prompt: 'AI in labs', numCards: 7, exportAs: 'pptx' }) });
-  assert.equal(created.status, 200);
+  assert.equal(created.status, 202); // Gamma's agent create status
   const { generationId, status } = await created.json();
   assert.match(generationId, /^gen_[a-f0-9]{24}$/);
   assert.equal(status, 'pending');
@@ -183,7 +183,9 @@ test('service: auth, disabled API, review stop and engine errors', async () => {
 
   const h = harness();
   h.setGenerateStatus(409);
-  const { generationId } = await (await call(h, 'generations', { method: 'POST', body: JSON.stringify({ inputText: 'x' }) })).json();
+  const classic = await call(h, 'generations', { method: 'POST', body: JSON.stringify({ inputText: 'x' }) });
+  assert.equal(classic.status, 200); // Gamma's Classic create status
+  const { generationId } = await classic.json();
   await call(h, `generations/${generationId}`);
   const failed = await (await call(h, `generations/${generationId}`)).json();
   assert.equal(failed.status, 'failed');

@@ -86,6 +86,7 @@
 | 32 | Gamma 兼容 API 没有设置 key 的界面，只能用环境变量 `PPT_GAMMA_API_KEY` 或直接写 setting `ppt_gamma_api_key`（见 docs/handover/ppt-gamma-compat.md） | 低 | 外部脚本/Agent 调用 PPT | 2026-11-05 |
 | 33 | Gamma 兼容 API 的真实引擎端到端未跑（本地 dev 无登录体系）；需在打包登录版上用 Classic/Agent 各跑一次到下载 | 中 | `/api/ppt/gamma/v1.0` | 2026-11-05 |
 | 34 | 应用内粘贴路径把无法嵌入的远程图片引用视为必需来源并阻断生成；API 路径已按 Gamma 语义跳过，应用内可加“跳过无法读取的图片”选项 | 低 | PPT 粘贴/提示词输入 | 2026-11-05 |
+| 35 | Gamma 兼容 API 的 `progress.percent` 由实时页数计算，生成中拆出续页时会回落；Gamma 保证同一次尝试内不下降。修法：在 `ppt_gamma_jobs` 记录已报告的最大值并取 max | 低 | `/api/ppt/gamma/v1.0/agent/generations/{id}` | 2026-11-05 |
 
 ## 已解决
 

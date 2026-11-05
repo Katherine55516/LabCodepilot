@@ -30,6 +30,13 @@
 
 错误体统一为 Gamma 的 `{message, statusCode, code?}`。Classic 与 Agent 的 id 不能互查（404）。
 
+创建状态码与 Gamma 一致：Classic `POST /generations` 返回 **200**，Agent `POST /agent/generations` 返回 **202**（2026-11-05 逆向报告核对后修正，原先两者都是 200）。
+
+**与 Gamma 的已知偏差**（逆向报告 [02](../research/gamma-reverse/02-generation-pipeline.md) / [07](../research/gamma-reverse/07-mcp-integrations-errors-limits.md) 核对得出）：
+- 额外的警告码：`num_cards_adjusted`、`amount_adjusted`、`image_source_unsupported`、`ignored_image_options`、`dimensions_unsupported`、`ignored_header_footer`、`ignored_text_options`、`ignored_quality`、`ignored_publish`、`card_split_fallback`、`image_urls_skipped`、`quality_review` 不在 Gamma 的警告枚举里；严格按枚举校验的客户端需放宽。`ignored_folder_id`、`ignored_workspace_access`、`ignored_external_access`、`ignored_email_options` 与 Gamma 同名。
+- 失败的 `statusCode` 固定为 422，`reason` 固定为 `generation_failed`；Gamma 没有公开每个 reason 对应的状态码。
+- `percent` 由当前页数实时计算；生成中卡片拆出续页会让总数变大、百分比回落，而 Gamma 只在重试时才可能回落（技术债务 #35）。
+
 ## 3. 鉴权
 
 - key 来源：setting `ppt_gamma_api_key`（密封落盘），或环境变量 `PPT_GAMMA_API_KEY`。都没有则 403 `api_disabled`（默认关闭）。
