@@ -1,0 +1,3 @@
+# Downloaded Gamma docs corpus (third-party content; regenerate with scripts/fetch-gamma-docs.sh)
+cache/
+node_modules/

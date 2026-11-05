@@ -121,6 +121,10 @@ const nextConfig: NextConfig = {
     // dev 用 Turbopack 不做这层解析，所以只在打包时炸。标记 external 让 webpack 不进包，
     // 运行时按真实 node_modules 解析；整包已由下方 outputFileTracingIncludes 复制进 standalone。
     '@playwright/mcp',
+    // pdfjs-dist (legacy build) + its optional Node canvas: Decks reads PDFs and crops figures on the server.
+    // Keep them as real packages at runtime (worker file lookup, native canvas binary).
+    'pdfjs-dist',
+    '@napi-rs/canvas',
     '@anthropic-ai/claude-agent-sdk',
     '@anthropic-ai/claude-agent-sdk-darwin-arm64',
     '@anthropic-ai/claude-agent-sdk-darwin-x64',

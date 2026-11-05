@@ -2,7 +2,7 @@
 
 - [PPT自适应排版](completed/ppt-adaptive-layout-20261027.md)：原子媒体、图片/图注、规则卡片和C9空框；真实交互、同源24页原生回读与局部恢复验收完成。
 
-进行中：[上传模板媒体：槽位规则、图片读取与不重复](active/ppt-template-media-slots-20261102.md)（2026-11-02）。
+进行中：[Decks：按 Gamma 逆向复刻的卡片演示模块](active/decks-gamma-replica.md)（2026-11-05，Phase 0–4 完成，Phase 5 待做）；[上传模板媒体：槽位规则、图片读取与不重复](active/ppt-template-media-slots-20261102.md)（2026-11-02）。
 
 交接给 Codex：[Claude Agent SDK 轮次评审与待办](active/ppt-sdk-round-handoff-20261103.md)（2026-11-03）— 本轮已完成项、7 输入验收结果、按优先级排列的待改进点与复现方法。
 
@@ -56,6 +56,7 @@
 
 ### 本轮已完成
 
+- [PPT Gamma 兼容 API](completed/ppt-gamma-compat-20261105.md)：Gamma 公共 API v1.0 子集（Classic/Gamma 5 创建与轮询、主题、签名下载）驱动 PPT 引擎；真实登录版端到端待跑。
 - [PPT 111项质量复核后的修复与同源回归](completed/ppt-quality-111-remediation-20261027.md)：内容/公式/Canvas、检查器误报与来源版本、排版媒体及C9空框；3159单测、13领域回归和真实同源生成/原生回读通过，保留未验证边界。
 
 - [局部填框来源自动分配](completed/ppt-component-source-allocation-20261027.md)：来源流程跨框分配与容量规划；原C6同短指令真实Qwen首次通过、独立语义核验及原生导出，3135项单测通过。

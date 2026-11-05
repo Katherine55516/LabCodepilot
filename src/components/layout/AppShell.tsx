@@ -98,7 +98,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const desktopHost=useSyncExternalStore(subscribeDesktopHost,desktopHostSnapshot,()=>false);
-  const standalonePpt=pathname==='/ppt'&&!desktopHost;
+  // Decks present/print pages are full-screen surfaces with no app chrome, on every host.
+  const standalonePpt=(pathname==='/ppt'&&!desktopHost)||/^\/decks\/[^/]+\/(present|print)$/.test(pathname);
 
   const [chatListOpenRaw, setChatListOpenRaw] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);

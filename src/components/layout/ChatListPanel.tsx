@@ -34,6 +34,9 @@ import {
 import { usePanel } from "@/hooks/usePanel";
 import { useSplit } from "@/hooks/useSplit";
 import { useTranslation } from "@/hooks/useTranslation";
+// eslint-disable-next-line no-restricted-imports -- Cards is not re-exported by ui/icon (owned elsewhere)
+import { Cards } from "@phosphor-icons/react";
+import { useDecksT } from "@/components/decks/i18n";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { showToast } from '@/hooks/useToast';
@@ -103,6 +106,7 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
   }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
+  const decksT = useDecksT();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
@@ -781,6 +785,14 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
             <Button variant="ghost" size="sm" className={`w-full justify-start gap-2 h-8 text-xs ${pathname.startsWith('/ppt') ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
               <FileArrowDown size={14} weight={pathname.startsWith('/ppt') ? 'fill' : 'regular'} />
               {t('ppt.sidebarButton')}
+            </Button>
+          </Link>
+        )}
+        {activeTab === 'office' && (
+          <Link href="/decks">
+            <Button variant="ghost" size="sm" className={`w-full justify-start gap-2 h-8 text-xs ${pathname.startsWith('/decks') ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+              <Cards size={14} weight={pathname.startsWith('/decks') ? 'fill' : 'regular'} />
+              {decksT('decks.title')}
             </Button>
           </Link>
         )}

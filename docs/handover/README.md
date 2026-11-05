@@ -6,6 +6,10 @@
 
 ## 索引
 
+- [Decks：卡片式 AI 演示模块（按 Gamma 逆向复刻，分支 claude/decks-gamma-replica）](decks.md)：Deck → Card → Block 文档模型、大纲 → 逐卡阶段生成、图片来源与装饰图、按范围的 AI 编辑与版本、停止/排队、原生 PPTX/PDF/PNG 导出；API、DB、测试与验证记录。
+- [Decks Gamma 兼容 API（Gamma 公共 API v1.0 over Decks）](decks-gamma-api.md)：`/api/decks/gamma/v1.0` 的 Classic/Gamma 5 创建与逐卡真实进度、原地应用的 AI 编辑、导出与签名 PPTX 下载、gamma 元数据、主题；字段映射表、id 推导方案、并发 429、与 Gamma 的差异。
+- [PPT Gamma 兼容 API（Gamma 公共 API v1.0 子集）](ppt-gamma-compat.md)：Classic/Gamma 5 创建与轮询、主题、签名下载；参数映射与拒绝/警告规则、轮询驱动的引擎推进、图片 URL 抓取与私网防护、`ppt_gamma_jobs` 表。
+
 - [PPT 111项质量修复与同输入验收](ppt-quality-111-remediation-20261027.md)：内容表/数学/Canvas、检查器、容器与版本；保留首轮真实失败和后续复测证据。
 
 - [PPT 上传模板：模板页识别与原生填充（fill-template-first MVP，验收中）](ppt-template-fill.md)：模板页 profile 接口、原生文本框与图位填充、固定页、图页用模板图位、生成被拒的提示

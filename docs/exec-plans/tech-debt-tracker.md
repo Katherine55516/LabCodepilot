@@ -83,6 +83,13 @@
 | 25 | 执行流事件在内存中无界增长：大回归套件（十几条用例 × 几百条工具调用）的 `libraryLive.cases[].events` 会持续膨胀。按用例分段 + 工具轨迹折叠缓解了渲染压力，但数组本身未封顶/虚拟化 | 低 | 超大套件长跑后滚动可能卡顿 | 2026-07-10 |
 | 31 | `claude-client.ts` 的 catch 块**不区分「本轮已成功交付」**：只要迭代器最终抛错，就一律分类 + 发 error SSE + 清 `sdk_session_id`。但 print 模式收尾阶段的失败（后台任务被强杀 → exit 1）发生在 result 之后，此时 SDK 报的是 `process exited with code N` 而非 `returned an error result`（按 SDK `lastErrorResultText` 逻辑，这只在 result 是 `is_error:false` 时可能），即答案已完整交付，报错纯属误报；更糟的是清掉 `sdk_session_id` 会把下一轮推上「历史当纯文本重发」路径，而那条路径正是上游内容策略拦截（CONTENT_BLOCKED）反复复发的入口。修法：本轮收到过 `is_error:false` 的 result 后，把后续进程退出错误降级为只记日志（不发 error SSE、不清 session）。已通过 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=60000` 把等待窗口从 10 分钟压到 1 分钟，但**误报本身仍在**（sweep 照样 exit 1，只是提前了）。现场证据与推导见 [handover/provider-error-doctor.md](../handover/provider-error-doctor.md)「print 模式后台任务收尾上限」 | 中 | 成功回合被显示成失败并弹「检查 API Key / Base URL」；连带清 session 触发内容拦截复发 | 2026-08-17 |
 | 30 | Cowork 凭证探测无观测信号:坏 token 打到 cowork-proxy 只回 401 且故意不打日志(防敏感头落盘),宿主审计无 cred_reject 类事件(audit.mjs 注释曾预留未实现,R5-4 复查发现该注释误导过运维文档,已修正注释与文档)。修复思路:cred-proxy.py 把拒绝**计数**(不含头/路径)打 stdout 进 docker logs,或 server 周期 docker exec 收集计数写宿主审计 | 低 | 无法监控凭证暴力探测;审计链有盲区 | 2026-07-17 |
+| 32 | Gamma 兼容 API 没有设置 key 的界面，只能用环境变量 `PPT_GAMMA_API_KEY` 或直接写 setting `ppt_gamma_api_key`（见 docs/handover/ppt-gamma-compat.md） | 低 | 外部脚本/Agent 调用 PPT | 2026-11-05 |
+| 33 | Gamma 兼容 API 的真实引擎端到端未跑（本地 dev 无登录体系）；需在打包登录版上用 Classic/Agent 各跑一次到下载 | 中 | `/api/ppt/gamma/v1.0` | 2026-11-05 |
+| 34 | 应用内粘贴路径把无法嵌入的远程图片引用视为必需来源并阻断生成；API 路径已按 Gamma 语义跳过，应用内可加“跳过无法读取的图片”选项 | 低 | PPT 粘贴/提示词输入 | 2026-11-05 |
+| 35 | Gamma 兼容 API 的 `progress.percent` 由实时页数计算，生成中拆出续页时会回落；Gamma 保证同一次尝试内不下降。修法：在 `ppt_gamma_jobs` 记录已报告的最大值并取 max | 低 | `/api/ppt/gamma/v1.0/agent/generations/{id}` | 2026-11-05 |
+| 36 | Decks 未用真实服务商做端到端验收（开发环境无模型凭据）；需在桌面登录版上用至少一个文本服务商 + 一个图片服务商各跑一份卡片集，检查内容质量、装饰图与 PPTX | 中 | `/decks` | 2026-11-05 |
+| 37 | ~~Decks 的表格、图表、指标卡没有手动编辑表单；logo 槽只显示文字~~ 已解决（第二轮：元素检查器与 logo 图片，见 handover/decks.md §8b）。余项：列表/标题/段落无表单（直接在卡片上编辑即可） | 低 | `/decks` 编辑器 | 2026-11-05 |
+| 38 | Decks 字符串在模块内字典（`src/components/decks/strings-*.ts`），未并入 `src/i18n/en.ts`/`zh.ts`；合并回主线时迁移 | 低 | i18n | 2026-11-05 |
 
 ## 已解决
 

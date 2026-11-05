@@ -8,6 +8,8 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [decks.md](./decks.md) | [handover/decks.md](../handover/decks.md) | Decks：为什么另起并行模块而不改 /ppt（风险隔离、两种产品哲学、本机运行）；大纲即内容、卡片数软目标、按内容选组件、原创装饰图、输入图片宽松语义、先定范围的编辑、生成中指令排队、mock 模型显式标注；不复刻的部分（名称/Logo/视觉、图库、站点与分析）与理由 |
+| [ppt-gamma-compat.md](./ppt-gamma-compat.md) | [handover/ppt-gamma-compat.md](../handover/ppt-gamma-compat.md) | Gamma 兼容 API：闭源产品能合法逆向的是公开契约；兼容而非自造（零学习成本、契约已验证、反向检验引擎）；宁可 400 不假装支持；审阅停顿折叠为失败+链接；API 调用方采用 Gamma 的图片跳过语义；默认关闭；局限与方向（编辑、MCP、accent 图） |
 | [ppt-template-fill.md](./ppt-template-fill.md) | [handover/ppt-template-fill.md](../handover/ppt-template-fill.md) | 先往模板里填写：先读懂模板页再写内容，按内容选页不强求用完，识别保守回退完整，图和解说优先于原生填充 |
 | [ppt-template-media-slots.md](./ppt-template-media-slots.md) | [handover/ppt-template-media-slots.md](../handover/ppt-template-media-slots.md) | 上传模板媒体消失与重复：先手工做稿再定槽位规则，读懂图片再决定去留，不重复优先于填满，上限是规则，图表要读得清 |
 | [ppt-card-outline-option-d.md](./ppt-card-outline-option-d.md) | [handover/ppt-card-outline-option-d.md](../handover/ppt-card-outline-option-d.md) | PPT 卡片稿：大纲失败点太多、模板太死、门禁太多；学 Gamma 设置在前、两次调用写大纲、写完后按指令重写、方案 D 版式、按需 AI 检查 |

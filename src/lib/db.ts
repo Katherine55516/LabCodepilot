@@ -46,6 +46,8 @@ const SENSITIVE_SETTINGS = new Set<string>([
   // Cowork 远程沙箱的用户 HMAC token(R5-5 账号下发)。密封落盘;读侧 getSetting 透明
   // 解密,存量明文值 open() 直通兼容(dev 后门手写的明文无需迁移)。
   'cowork_remote_token',
+  // Gamma-compatible PPT API key (src/lib/ppt-gamma-service.ts). Also signs export links.
+  'ppt_gamma_api_key',
 ]);
 
 // MCP 市场安装时收集的密钥（API key / token 等）以此为前缀写入，加密落盘——
@@ -1150,6 +1152,81 @@ function migrateDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_tse_type_time ON test_stats_events(event_type, created_at);
     CREATE INDEX IF NOT EXISTS idx_tse_task ON test_stats_events(task_id);
+  `);
+
+  // Gamma 兼容 API 的生成任务：generationId → PPT 项目 + 首次请求里需要在轮询时用到的设置。
+  // 见 docs/handover/ppt-gamma-compat.md。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ppt_gamma_jobs (
+      id TEXT PRIMARY KEY,
+      uid TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      flavor TEXT NOT NULL,
+      settings TEXT NOT NULL DEFAULT '{}',
+      warnings TEXT NOT NULL DEFAULT '[]',
+      phase TEXT NOT NULL DEFAULT 'created',
+      phase_error TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ppt_gamma_jobs_project ON ppt_gamma_jobs(project_id);
+  `);
+
+  // Decks（卡片演示，按 Gamma 逆向报告复刻的本机模块）：整份文档存 JSON（deck 即 Gamma 的 file），
+  // 每次保存递增 version 并写入 deck_versions 供恢复；任务、媒体、AI 编辑提案各一张表。
+  // 见 docs/handover/decks.md。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS decks (
+      id TEXT PRIMARY KEY,
+      uid TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      doc TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_decks_uid_updated ON decks(uid, updated_at);
+    CREATE TABLE IF NOT EXISTS deck_versions (
+      deck_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      doc TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (deck_id, version)
+    );
+    CREATE TABLE IF NOT EXISTS deck_jobs (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress TEXT NOT NULL DEFAULT '{}',
+      payload TEXT NOT NULL DEFAULT '{}',
+      queued TEXT NOT NULL DEFAULT '[]',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_jobs_deck ON deck_jobs(deck_id, created_at);
+    CREATE TABLE IF NOT EXISTS deck_media (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      path TEXT NOT NULL,
+      meta TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_media_deck ON deck_media(deck_id);
+    CREATE TABLE IF NOT EXISTS deck_proposals (
+      id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      doc TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deck_proposals_deck ON deck_proposals(deck_id, created_at);
   `);
 
   // 凭证列加密迁移：把历史明文敏感列就地重封为密文。必须放在所有列迁移之后。
@@ -3981,3 +4058,35 @@ function registerShutdownHandlers(): void {
 }
 
 registerShutdownHandlers();
+
+
+// ==========================================
+// Gamma-compatible PPT API jobs
+// ==========================================
+
+interface PptGammaJobRow { id: string; uid: string; project_id: string; flavor: string; settings: string; warnings: string; phase: string; phase_error: string; created_at: string; updated_at: string }
+
+export function insertPptGammaJob(job: import('./ppt-gamma-service').GammaJobRecord): void {
+  getDb().prepare(
+    `INSERT INTO ppt_gamma_jobs (id, uid, project_id, flavor, settings, warnings, phase, phase_error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(job.id, job.uid, job.projectId, job.flavor, JSON.stringify(job.settings), JSON.stringify(job.warnings), job.phase, job.phaseError, job.createdAt, job.updatedAt);
+}
+
+export function getPptGammaJob(id: string): import('./ppt-gamma-service').GammaJobRecord | undefined {
+  const row = getDb().prepare('SELECT * FROM ppt_gamma_jobs WHERE id = ?').get(id) as PptGammaJobRow | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id, uid: row.uid, projectId: row.project_id, flavor: row.flavor === 'agent' ? 'agent' : 'classic',
+    settings: JSON.parse(row.settings), warnings: JSON.parse(row.warnings),
+    phase: row.phase as import('./ppt-gamma-compat').GammaJobPhase, phaseError: row.phase_error,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
+export function updatePptGammaJob(id: string, patch: { phase?: string; phaseError?: string }): void {
+  const current = getPptGammaJob(id);
+  if (!current) return;
+  getDb().prepare('UPDATE ppt_gamma_jobs SET phase = ?, phase_error = ?, updated_at = ? WHERE id = ?')
+    .run(patch.phase ?? current.phase, patch.phaseError ?? current.phaseError, new Date().toISOString(), id);
+}
