@@ -223,3 +223,7 @@
 - **P3 `real-fixture` 基线**：靠章节主题迁移表对齐当前分段（已 4 页）。再多两页需要迁移时，在当前分段下重生成基线并去掉迁移表。
 - **P2 main 的垃圾文件（Fable Q2）**：`e1929ae7` 带进 `outputs/`、`.ppt-build/`、`apps/cowork-server/node_modules`（katex 0.19.0 等）、`cowork-audit.log`、`public/System/Library/Fonts/Supplemental/Arial.ttf`。合并进 main 后用单独提交 `git rm --cached` 并加 `.gitignore`；先让 cowork-server 自己安装依赖并验证 KaTeX 输出，查清是否有代码引用该 Arial.ttf 路径。需用户批准。
 
+
+- **P1 #39 Decks Lab 真实模型验收**：长文档规划/引用/组件指令只用离线演示模型验证过；需用真实服务商（如 qwen-3.8-max，经 /decks/lab 的“从环境变量配置”或设置页）跑论文 + 多模板对照。
+- **P2 #40 PDF/图像依赖打包**：`pdfjs-dist`（经 react-pdf/pptx-renderer 间接引入）与其可选依赖 `@napi-rs/canvas` 已设为 serverExternalPackages，但未作为直接依赖声明，Electron 打包产物需验证可用（不可用时图片裁切与图案周期检测会降级）。
+- **P3 #41 不规则模板构图**：对角超大编号、照片穿插等构图被识别为固定项数或效果一般；可考虑人工标注或更强的版式识别。
